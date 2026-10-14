@@ -1,0 +1,13 @@
+# 运行时数据（含全局设置，可能含模型密钥，禁止入库）
+solve-eval-app/data/
+
+# 日志与系统垃圾文件
+*.log
+.DS_Store
+
+# 本地记忆与工作区数据
+.workbuddy/
+
+# 依赖
+node_modules/
+npm-debug.log*

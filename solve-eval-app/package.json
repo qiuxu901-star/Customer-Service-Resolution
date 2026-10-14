@@ -1,0 +1,13 @@
+{
+  "name": "customer-service-resolution",
+  "version": "1.0.0",
+  "private": true,
+  "description": "客服 AI 解决能力价值评估平台（解决力评估）：对话取数、会话检测、人工复核、数据看板、材料就绪度追踪",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

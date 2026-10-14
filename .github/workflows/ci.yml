@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: solve-eval-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: JS 语法检查
+        run: |
+          for f in server.js engine.js agent.js storage.js standards-seed.js public/app.js; do
+            node --check "$f" && echo "OK $f"
+          done
+
+      - name: 服务启动冒烟
+        run: |
+          node server.js &
+          SERVER_PID=$!
+          sleep 2
+          curl -sf http://localhost:8817/api/bootstrap > /dev/null && echo "bootstrap OK"
+          curl -sf http://localhost:8817/api/materials > /dev/null && echo "materials OK"
+          curl -sf -X POST http://localhost:8817/api/agent/chat \
+            -H 'Content-Type: application/json' \
+            -d '{"message":"当前完整方案可交付率是多少？"}' > /dev/null && echo "agent OK"
+          kill $SERVER_PID

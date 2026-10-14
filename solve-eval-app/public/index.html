@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>客服 AI 解决能力价值评估</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">校</div>
+      <div class="brand-text">
+        <div class="brand-name">解决力评估</div>
+        <div class="brand-sub">客服 AI 解决能力价值评估</div>
+      </div>
+    </div>
+    <nav class="nav" id="nav">
+      <button class="nav-item active" data-view="agent"><span class="nav-idx">01</span>评估助手</button>
+      <button class="nav-item" data-view="detect"><span class="nav-idx">02</span>检测台</button>
+      <button class="nav-item" data-view="review"><span class="nav-idx">03</span>人工复核台<span class="nav-badge" id="reviewBadge"></span></button>
+      <button class="nav-item" data-view="board"><span class="nav-idx">04</span>数据看板</button>
+      <button class="nav-item" data-view="records"><span class="nav-idx">05</span>全盘记录</button>
+      <button class="nav-item" data-view="materials"><span class="nav-idx">06</span>材料中心<span class="nav-badge nav-badge-warn" id="matBadge"></span></button>
+      <button class="nav-item" data-view="standards"><span class="nav-idx">07</span>标准库</button>
+      <button class="nav-item" data-view="corrections"><span class="nav-idx">08</span>纠正任务<span class="nav-badge" id="corrBadge"></span></button>
+      <button class="nav-item" data-view="settings"><span class="nav-idx">09</span>设置</button>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="engine-chip" id="engineChip">引擎：规则模式</div>
+      <div class="operator-chip" id="operatorChip">操作人：未设置</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <!-- 01 评估助手 -->
+    <section class="view active" id="view-agent">
+      <header class="view-head">
+        <h1>评估助手</h1>
+        <p class="view-desc">用大白话向助手提问，即可获取平台数据与分析结论；也可以直接把一段会话贴进来让它检测。助手默认走规则路由（零依赖）；在设置页接入大模型后，可理解更自由的说法（失败自动降级）。</p>
+      </header>
+      <div class="chat-wrap">
+        <div class="chat-quick" id="chatQuick"></div>
+        <div class="chat-list" id="chatList"></div>
+        <div class="chat-inputbar">
+          <textarea id="chatInput" class="ta" rows="2" placeholder="试试：当前完整方案可交付率是多少？ / 无法判断的原因分布？ / 检测这段对话：司机：奖励还没到账 意图：奖励到账咨询 场景：奖励到账查询 AI建议：…"></textarea>
+          <button class="btn btn-primary" id="btnChatSend">发送</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 02 检测台 -->
+    <section class="view" id="view-detect">
+      <header class="view-head">
+        <h1>检测台</h1>
+        <p class="view-desc">输入司机与客服的真实会话及系统结果，引擎按《检测规则清单》独立还原诉求、分环节验证、输出可解释判定；信息不足时会先向你提问。</p>
+      </header>
+      <div class="seg" id="inputMode">
+        <button class="seg-btn active" data-mode="single">单条检测</button>
+        <button class="seg-btn" data-mode="batch">批量导入</button>
+      </div>
+
+      <div class="pane" id="singlePane">
+        <div class="form-grid">
+          <div class="form-col">
+            <label class="field-label">原始会话 <span class="field-req">必填</span></label>
+            <textarea id="f_session" class="ta ta-tall" placeholder="每行按角色粘贴，例如：&#10;司机：上周的保底奖励还没有到账&#10;客服：我帮您查一下&#10;司机：而且显示的金额少了 30 元"></textarea>
+            <div class="field-hint">格式：司机 / 客服 / AI 开头，支持空行分隔轮次。语音转写文本同样按此格式粘贴（R6）</div>
+          </div>
+          <div class="form-col">
+            <label class="field-label">来源类型</label>
+            <select id="f_source" class="input">
+              <option value="text">在线文本会话</option>
+              <option value="asr">语音转写</option>
+            </select>
+            <label class="field-label">系统识别意图</label>
+            <div class="field-row">
+              <input id="f_intent_id" class="input" placeholder="意图 ID（选填）">
+              <input id="f_intent_name" class="input" placeholder="意图名称">
+            </div>
+            <label class="field-label">命中场景</label>
+            <div class="field-row">
+              <input id="f_scene_id" class="input" placeholder="场景 ID（选填）">
+              <input id="f_scene_name" class="input" placeholder="场景名称">
+            </div>
+            <label class="field-label">AI 建议回复 <span class="field-req">必填</span></label>
+            <textarea id="f_ai_reply" class="ta" placeholder="AI 提供给客服的辅助答复原文"></textarea>
+            <label class="field-label">执行结果（可选）</label>
+            <input id="f_exec" class="input" placeholder="如：退款已到账 / 工单已关闭（一期只记录）">
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" id="btnDetect">开始检测</button>
+          <button class="btn btn-ghost" id="btnDemo">填入示例会话</button>
+          <span class="form-note">缺失即标记、不补造（R2/R4）；阻断级缺失引擎会先提问</span>
+        </div>
+      </div>
+
+      <div class="pane hidden" id="batchPane">
+        <label class="field-label">批量导入（每行一条会话）</label>
+        <textarea id="f_batch" class="ta ta-tall" placeholder="JSON 数组，例如：&#10;[&#10;  {&quot;session_text&quot;:&quot;司机：奖励还没到账\n客服：帮您核实&quot;,&quot;intent_name&quot;:&quot;奖励到账咨询&quot;,&quot;scene_name&quot;:&quot;奖励到账咨询&quot;,&quot;ai_reply&quot;:&quot;奖励一般三个工作日内到账&quot;},&#10;  {&quot;session_text&quot;:&quot;...&quot;}&#10;]"></textarea>
+        <div class="field-hint">字段：session_text（必填）/ intent_id / intent_name / scene_id / scene_name / ai_reply（必填）/ exec_result / source_type / session_time。导入后逐条实时检测，出一条看一条。</div>
+        <div class="form-actions">
+          <button class="btn btn-primary" id="btnBatch">导入并检测</button>
+          <a class="btn btn-ghost" href="/api/templates?kind=batch" download>下载批量模板（CSV）</a>
+          <span class="form-note" id="batchNote"></span>
+        </div>
+        <div id="batchResults" class="batch-results"></div>
+      </div>
+
+      <div id="questionBox" class="pane hidden"></div>
+      <div id="reportBox"></div>
+    </section>
+
+    <!-- 03 人工复核台 -->
+    <section class="view" id="view-review">
+      <header class="view-head">
+        <h1>人工复核台</h1>
+        <p class="view-desc">检测结果自动落入「待复核」。六态看板逐条确认：确认通过 / 驳回修正 / 补充证据 / 标记无法判断 / 提交标准事项。原检测结论永远保留，人工结论独立留痕。</p>
+      </header>
+      <div class="toolbar">
+        <div class="seg" id="reviewStatusSeg"></div>
+        <div class="seg" id="reviewPrioritySeg"></div>
+      </div>
+      <div class="review-layout">
+        <div class="review-list" id="reviewList"></div>
+        <div class="review-detail" id="reviewDetail"><div class="empty">从左侧选择一条复核任务</div></div>
+      </div>
+    </section>
+
+    <!-- 04 数据看板 -->
+    <section class="view" id="view-board">
+      <header class="view-head">
+        <h1>数据看板</h1>
+        <p class="view-desc">五层指标：解决能力总览 → 决策链路质量 → 人工替代潜力 → 问题归因 → 纠正进展。全部指标注明分子分母；无法判断与能力指标并列披露。点击指标卡可下钻到全盘记录。</p>
+      </header>
+      <div id="boardBox"></div>
+    </section>
+
+    <!-- 05 全盘记录 -->
+    <section class="view" id="view-records">
+      <header class="view-head">
+        <h1>全盘记录</h1>
+        <p class="view-desc">每一次输入、每一次检测、每一条复核都在此留痕，可追溯、可导出。</p>
+      </header>
+      <div class="toolbar">
+        <input id="recordSearch" class="input input-search" placeholder="搜索会话 ID / 意图 / 场景 / 内容…">
+        <select id="recFilterLevel" class="input" style="width:130px"><option value="">全部等级</option><option>L3</option><option>L2</option><option>L1</option><option>L0</option><option>U</option></select>
+        <select id="recFilterIntent" class="input" style="width:150px"><option value="">全部意图</option></select>
+        <select id="recFilterScene" class="input" style="width:150px"><option value="">全部场景</option></select>
+        <select id="recFilterReview" class="input" style="width:130px"><option value="">全部复核态</option><option>待复核</option><option>复核中</option><option>已复核</option><option>争议待裁决</option><option>标准待完善</option><option>已裁决</option></select>
+        <button class="btn btn-ghost" data-export="sessions" data-format="json">导出 JSON</button>
+        <button class="btn btn-ghost" data-export="sessions" data-format="csv">导出 CSV</button>
+        <button class="btn btn-ghost" data-export="detections" data-format="csv">导出检测</button>
+        <button class="btn btn-ghost" data-export="reviews" data-format="csv">导出复核</button>
+        <button class="btn btn-ghost" data-export="materials" data-format="csv">导出材料清单</button>
+      </div>
+      <div id="recordsBox"></div>
+    </section>
+
+    <!-- 06 材料中心 -->
+    <section class="view" id="view-materials">
+      <header class="view-head">
+        <h1>材料中心</h1>
+        <p class="view-desc">平台能不能跑通，取决于「尺子」和「样本」够不够。这里列出需要你提供的全部材料、为什么需要、什么格式，附可直接导入的模板。对话里直接发给我也可以，我来整理入库。</p>
+      </header>
+      <div id="matOverview"></div>
+      <div class="pane">
+        <h3 style="font-size:14px;font-weight:500;margin-bottom:12px">模板下载（下载后按行填写，回到本页导入）</h3>
+        <div class="toolbar">
+          <a class="btn btn-ghost" href="/api/templates?kind=intent" download>意图库模板</a>
+          <a class="btn btn-ghost" href="/api/templates?kind=scene" download>场景库模板</a>
+          <a class="btn btn-ghost" href="/api/templates?kind=mapping" download>映射规则模板</a>
+          <a class="btn btn-ghost" href="/api/templates?kind=checklist" download>检查清单模板</a>
+          <a class="btn btn-ghost" href="/api/templates?kind=cases" download>正负案例模板</a>
+          <a class="btn btn-ghost" href="/api/templates?kind=sessions" download>真实会话样本模板</a>
+        </div>
+        <div class="field-hint">模板为 CSV（UTF-8，Excel 可直接打开）。也可以直接粘贴 JSON 数组导入。</div>
+      </div>
+      <div class="pane">
+        <h3 style="font-size:14px;font-weight:500;margin-bottom:12px">导入标准（意图定义 / 场景定义 / 映射 / 检查清单 / 回复规则 / 正负案例）</h3>
+        <textarea id="f_std_import" class="ta ta-tall" placeholder="粘贴 CSV（含表头）或 JSON 数组，例如：&#10;标准类型,名称,内容,状态&#10;意图定义,奖励未到账咨询,&quot;司机询问奖励为什么没到账。排除：金额算错&quot;,已生效"></textarea>
+        <div class="form-actions">
+          <button class="btn btn-primary" id="btnStdImport">解析并导入</button>
+          <span class="form-note">重复（同类型+同名称）会自动跳过；导入后默认为「草稿」，在标准库点「生效」后参与检测。</span>
+        </div>
+        <div id="stdImportResult"></div>
+      </div>
+    </section>
+
+    <!-- 07 标准库 -->
+    <section class="view" id="view-standards">
+      <header class="view-head">
+        <h1>标准库</h1>
+        <p class="view-desc">标准是「尺子」：意图定义、场景定义、意图-场景映射、场景检查清单、回复规则、正负案例。尺子缺失时引擎按 UR 规则拒判，不换一把似是而非的尺子。</p>
+      </header>
+      <div class="std-layout">
+        <div class="std-form">
+          <h3>新增标准</h3>
+          <label class="field-label">类型</label>
+          <select id="std_type" class="input">
+            <option value="intent_def">意图定义</option>
+            <option value="scene_def">场景定义</option>
+            <option value="mapping">意图-场景映射</option>
+            <option value="checklist">场景检查清单</option>
+            <option value="reply_rule">回复规则</option>
+            <option value="case_positive">正案例</option>
+            <option value="case_negative">负案例</option>
+          </select>
+          <label class="field-label">名称</label>
+          <input id="std_name" class="input" placeholder="如：奖励金额异常">
+          <label class="field-label">内容（定义 / 规则 / 清单）</label>
+          <textarea id="std_content" class="ta ta-tall" placeholder="定义包含什么、排除什么；边界条件；版本说明"></textarea>
+          <label class="field-label">状态</label>
+          <select id="std_status" class="input">
+            <option value="草稿">草稿</option>
+            <option value="待确认">待确认</option>
+            <option value="已生效">已生效</option>
+          </select>
+          <button class="btn btn-primary" id="btnStdAdd">保存标准</button>
+        </div>
+        <div class="std-list" id="stdList"></div>
+      </div>
+      <div class="issues-block">
+        <h3>标准事项（由复核台「提交标准事项」产生）</h3>
+        <div id="issueList"></div>
+      </div>
+    </section>
+
+    <!-- 08 纠正任务 -->
+    <section class="view" id="view-corrections">
+      <header class="view-head">
+        <h1>纠正任务</h1>
+        <p class="view-desc">从复核台派生的待纠正事项：问题对象、当前等级、期望等级、归因、改进建议、复验结果。必须区分「原 AI 能力修正」与「评价标准修正」——改判据不等于 AI 变强。</p>
+      </header>
+      <div class="toolbar">
+        <div class="seg" id="corrStatusSeg"></div>
+      </div>
+      <div id="corrList"></div>
+    </section>
+
+    <!-- 09 设置 -->
+    <section class="view" id="view-settings">
+      <header class="view-head">
+        <h1>设置</h1>
+        <p class="view-desc">操作人姓名用于复核留痕；接入大模型后引擎与评估助手切换为 LLM 模式（失败自动降级规则引擎并标注）。</p>
+      </header>
+      <div class="settings-form">
+        <label class="field-label">操作人姓名</label>
+        <input id="set_operator" class="input" placeholder="复核与检测的署名">
+        <label class="field-label">L3 随机抽检比例（默认 10%）</label>
+        <input id="set_ratio" class="input" type="number" min="0" max="1" step="0.05" placeholder="0.1">
+        <div class="settings-divider">大模型配置（可选，OpenAI 兼容接口）</div>
+        <label class="field-label">接口地址 Base URL</label>
+        <input id="set_llm_url" class="input" placeholder="https://api.example.com/v1">
+        <label class="field-label">API Key</label>
+        <input id="set_llm_key" class="input" type="password" placeholder="仅保存在本机 db.json，不上传">
+        <label class="field-label">模型名</label>
+        <input id="set_llm_model" class="input" placeholder="如：gpt-4o-mini / deepseek-chat">
+        <button class="btn btn-primary" id="btnSaveSettings">保存设置</button>
+        <div class="field-hint">不配置大模型时，引擎与助手以规则模式运行：结论为启发式预判，必须经人工复核确认（G9 纪律）。</div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="modal-mask hidden" id="modalMask">
+  <div class="modal" id="modalBox"></div>
+</div>
+<div class="toast" id="toast"></div>
+<script src="/app.js"></script>
+</body>
+</html>
