@@ -51,3 +51,34 @@ node server.js          # Node >= 18，零依赖，无需 npm install
 | 发布 | GitHub Release 对应每个 minor/major tag，发布说明摘自 CHANGELOG |
 
 当前版本：**v1.0.0**（2026-10-14 首个可运行封版，见 CHANGELOG）。
+
+## 线上部署（2026-10-14）
+
+| 项 | 值 |
+|---|---|
+| 服务器 | 阿里云 ECS `47.103.25.159`（CentOS 8，root + SSH 密钥认证） |
+| 应用目录 | `/opt/customer-service-resolution` |
+| 服务单元 | systemd `csr`（`Restart=always`，开机自启，独立日志 `server.log`） |
+| 端口 | `8818`（与应用内默认 8817 区分，专供线上） |
+| 访问路径 A | `http://47.103.25.159:8818`（需在阿里云安全组放行 8818/tcp 入方向） |
+| 访问路径 B | `http://csr.2566.online`（nginx 反代 `zz-csr.conf` → 127.0.0.1:8818，需 DNS 加 A 记录；80/443 已在安全组放行） |
+| HTTPS | DNS 生效后执行 `certbot --nginx -d csr.2566.online`（服务器已装 certbot） |
+| 隔离性 | 独立目录 / 独立端口 / 独立 systemd 单元 / 独立 nginx conf（`zz-` 前缀保证加载顺序在原有配置之后，不抢占默认服务器位），与 iter-board、weekly-board、time-harness 互不影响 |
+| 数据 | 服务器为全新空库，`data/db.json` 在 `/opt/customer-service-resolution/solve-eval-app/data/` |
+
+**版本更新到服务器**（数据目录自动保留，不丢记录）：
+
+```bash
+# 本机：封版打 tag 后构建发布包
+git archive <tag> | tar -x -C /tmp/csr-pkg/customer-service-resolution
+tar -czf /tmp/csr-pkg/csr-<tag>.tar.gz -C /tmp/csr-pkg customer-service-resolution
+scp /tmp/csr-pkg/csr-<tag>.tar.gz root@47.103.25.159:/tmp/
+
+# 服务器：一键部署/更新
+ssh root@47.103.25.159
+cd /tmp && tar -xzf csr-<tag>.tar.gz customer-service-resolution/scripts/deploy.sh
+bash customer-service-resolution/scripts/deploy.sh /tmp/csr-<tag>.tar.gz
+# 如需换端口：PORT=8819 bash customer-service-resolution/scripts/deploy.sh /tmp/csr-<tag>.tar.gz
+```
+
+> 注意：阿里云安全组在云控制台配置，脚本无法代改；防火墙（firewalld/ufw）服务器端未启用。
