@@ -3,6 +3,12 @@
 本项目遵循[语义化版本 2.0.0](https://semver.org/lang/zh-CN/)与 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 规范。
 每次封版更新本文件并打附注 tag；版本号规则见根 README「版本迭代管理约定」。
 
+## [1.0.1] - 2026-10-15
+
+### 修复
+
+- **大模型调用无超时控制**：`agent.js` 的 `llmChat` 原先用无超时的 fetch，当 LLM 服务端故障挂起（返回 200 头但响应体永不到来，如 2026-10-15 DeepSeek V4.1 Flash API 部分中断）时，`/api/agent/chat` 会无限等待。现增加 45 秒超时（AbortController），超时后自动降级规则引擎并明确提示"大模型 N 秒无响应（疑似服务端故障或网络中断）"
+
 ## [1.0.0] - 2026-10-14
 
 首个可运行封版：由《业务需求及评估标准 V2.1》《PRD V1.0》《检测规则清单 V1.0》直接构建的最小可用平台。

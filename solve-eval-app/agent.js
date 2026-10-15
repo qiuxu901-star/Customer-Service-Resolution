@@ -8,6 +8,8 @@
 const DETECT_TRIGGER = /(检测|评估|分析|判断|跑一下|测一下|看看这)/;
 const ROLE_LINE = /^(司机|客服|AI|系统|转写|语音)\s*[:：]/;
 const CMD_PREFIX = /^\s*(?:帮我|请|麻烦)?(?:检测|评估|分析|判断|跑一下|测一下|看看这)[^：:\n]{0,16}[：:]\s*/;
+// 大模型调用超时（毫秒）：健康时几秒返回；故障挂起时及时降级到规则引擎，避免接口无限等待
+const LLM_TIMEOUT_MS = 45000;
 
 function looksLikeDetect(m) {
   if (DETECT_TRIGGER.test(m) && /司机\s*[:：]/.test(m)) return true;
@@ -305,13 +307,26 @@ async function llmChat(message, deps) {
     temperature: 0.2,
   };
   const doFetch = async (b) => {
-    const res = await fetch(llm.base_url.replace(/\/$/, '') + '/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + llm.api_key },
-      body: JSON.stringify(b),
-    });
-    if (!res.ok) throw new Error('LLM HTTP ' + res.status);
-    return res.json();
+    // 超时控制：LLM 故障时（如服务端挂起）及时中断并降级，避免整个接口无限等待
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(new Error('LLM_TIMEOUT')), LLM_TIMEOUT_MS);
+    try {
+      const res = await fetch(llm.base_url.replace(/\/$/, '') + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + llm.api_key },
+        body: JSON.stringify(b),
+        signal: ac.signal,
+      });
+      if (!res.ok) throw new Error('LLM HTTP ' + res.status);
+      return await res.json();
+    } catch (e) {
+      if (e && (e.message === 'LLM_TIMEOUT' || e.name === 'AbortError' || e.name === 'TimeoutError')) {
+        throw new Error('大模型 ' + Math.round(LLM_TIMEOUT_MS / 1000) + ' 秒无响应（疑似服务端故障或网络中断）');
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
   };
   let r1 = await doFetch(body);
   let c1 = (r1.choices && r1.choices[0] && r1.choices[0].message && r1.choices[0].message.content || '').trim();
