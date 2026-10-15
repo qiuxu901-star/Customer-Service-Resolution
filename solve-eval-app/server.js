@@ -9,7 +9,8 @@ const path = require('path');
 const { Storage } = require('./storage');
 const { analyze, parseMessages, mergeSupplements } = require('./engine');
 const { seedStandards } = require('./standards-seed');
-const { createAgent } = require('./agent');
+const { createAgent, getAgentConfig, ensureAgentConfig } = require('./agent');
+const M = require('./materials');
 
 const PORT = Number(process.env.PORT || 8817);
 const ROOT = __dirname;
@@ -19,6 +20,7 @@ const DATA_DIR = path.join(ROOT, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const storage = new Storage(path.join(DATA_DIR, 'db.json'));
 seedStandards(storage);
+ensureAgentConfig(storage);
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml' };
 
@@ -283,6 +285,7 @@ const routes = {
       engine_mode: (getLlmConfig().base_url && getLlmConfig().api_key && getLlmConfig().model) ? 'llm' : 'rule',
       standards: storage.list('standards').map((s) => ({ id: s.id, type: s.type, name: s.name, version: s.version, status: s.status })),
       materials: createAgent({ storage, computeStats, getLlmConfig }).materialsReadiness(),
+      datasets: M.datasetSummary(storage),
       stats: computeStats(),
     });
   },
@@ -326,6 +329,10 @@ const routes = {
       }
     }
     storage.update('batches', batch.id, { status: '已完成', stats_json: JSON.stringify({ ok, needInput, failed }) });
+    const addedIds = results.filter((r) => r.session_id).map((r) => r.session_id);
+    if (addedIds.length) {
+      M.recordSamplesVersion(storage, { added: addedIds.length, added_ids: addedIds, note: '批量导入：' + (body.name || '未命名批次'), operator: body.operator || storage.getSetting('operator', '') || '' });
+    }
     send(res, 200, { batch_id: batch.id, summary: { total: rows.length, ok, needInput, failed }, results });
   },
 
@@ -483,7 +490,9 @@ const routes = {
       version: 1, status: body.status || '草稿', source: '人工',
       effective_at: body.status === '已生效' ? new Date().toISOString() : null,
     });
-    send(res, 200, { standard: s });
+    const ds = M.datasetOfType(s.type);
+    const v = ds ? M.commitDataset(storage, ds.key, { note: '人工新增：' + s.name, source: '人工', operator: storage.getSetting('operator', '') }) : null;
+    send(res, 200, { standard: s, dataset_version: v ? v.version : null });
   },
 
   'PATCH /api/standards/:id': async (req, res, params) => {
@@ -496,12 +505,19 @@ const routes = {
       patch.status = body.status;
       if (body.status === '已生效') { patch.version = s.version + 1; patch.effective_at = new Date().toISOString(); }
     }
-    send(res, 200, { standard: storage.update('standards', s.id, patch) });
+    const updated = storage.update('standards', s.id, patch);
+    const ds = M.datasetOfType(s.type);
+    const v = ds ? M.commitDataset(storage, ds.key, { note: '人工修改：' + s.name, source: '人工', operator: storage.getSetting('operator', '') }) : null;
+    send(res, 200, { standard: updated, dataset_version: v ? v.version : null });
   },
 
   'DELETE /api/standards/:id': async (req, res, params) => {
+    const s = storage.byId('standards', params.id);
+    if (!s) return send(res, 404, { error: '标准不存在' });
     storage.remove('standards', params.id);
-    send(res, 200, { ok: true });
+    const ds = M.datasetOfType(s.type);
+    const v = ds ? M.commitDataset(storage, ds.key, { note: '人工删除：' + s.name, source: '人工', operator: storage.getSetting('operator', '') }) : null;
+    send(res, 200, { ok: true, dataset_version: v ? v.version : null });
   },
 
   'GET /api/standard-issues': async (req, res) => {
@@ -606,6 +622,16 @@ const routes = {
         ['正案例', '奖励到账查询', '「已查到您的奖励在10月第2批，审核中，按规则3个工作日内到账，可在司机端账单明细查看，超期可走奖励申诉」——有事实、有规则、有入口，属 L3。', '已生效'],
         ['负案例', '奖励到账查询', '「奖励一般三个工作日内到账，请您耐心等待」——只有通用规则没有当前事实，属 L1。', '已生效'],
       ]),
+      intent_wide: csv(['一级意图', '一级意图ID', '二级意图', '二级意图ID', '三级意图', '三级意图ID', '三级意图规则', '三级意图定义', '案例1', '案例2', '案例3'], [
+        ['司机违规申诉', '100', '判罚申诉', '110', '判罚结果异议', '111', '司机对判罚结果有异议、要求复核时适用', '司机不认可违章/违规判罚结果，要求复核或撤销。', '我根本没超速为什么判我违规', '这个判罚我不认可', ''],
+        ['司机违规申诉', '100', '判罚申诉', '110', '判罚依据咨询', '112', '', '司机询问判罚的具体依据与规则条款。', '判我违规的依据是什么', '', ''],
+      ]),
+      skill: csv(['标准类型', '名称', '内容（Skill 说明：适用场景/动作/输出要求/边界）', '状态'], [
+        ['Skill 定义', '奖励到账核查', '适用场景：司机询问奖励未到账。动作：按司机ID查奖励批次与审核状态。输出要求：说明当前批次/状态、到账时效规则、明细查看入口、超期申诉入口。边界：不承诺具体到账日期。', '已生效'],
+      ]),
+      skill_scene: csv(['标准类型', '名称', '内容（映射依据）', '状态'], [
+        ['Skill-场景映射', '奖励到账核查 → 奖励到账查询', '该 Skill 的输出正好覆盖「奖励到账查询」场景检查清单的全部检查项。', '已生效'],
+      ]),
       sessions: csv(['会话内容', '来源类型', '系统意图ID', '意图名称', '场景ID', '场景名称', 'AI建议回复', '执行结果', '会话时间'], [
         ['司机：上周的保底奖励还没有到账\n客服：我帮您核实一下', 'text', 'INT_1007', '奖励到账咨询', 'SC_2003', '奖励到账查询', '已查到您的奖励在10月第2批，审核中，按规则3个工作日内到账', '', '2026-10-10 14:30'],
         ['司机：奖励金额少了30元', 'text', 'INT_1008', '奖励金额异常', 'SC_2004', '奖励金额核查', '因为您上周有2单取消率超标，按规则扣减了对应奖励，您可在规则页查看明细', '', '2026-10-10 15:02'],
@@ -619,25 +645,92 @@ const routes = {
     res.end(text);
   },
 
-  // ---------- 标准批量导入 ----------
+  // ---------- 标准批量导入（扁平行：标准模板行 / 意图库宽表行） ----------
   'POST /api/standards/import': async (req, res) => {
     const body = await readBody(req);
-    const rows = Array.isArray(body.rows) ? body.rows : [];
-    if (!rows.length) return send(res, 400, { error: '导入内容为空' });
-    const existing = new Set(storage.list('standards').map((s) => s.type + '|' + s.name));
-    let added = 0; const skipped = [];
-    for (const r of rows) {
-      const type = String(r['标准类型'] || r.type || '').trim();
-      const name = String(r['名称'] || r.name || '').trim();
-      const content = String(r['内容（定义：含什么/排除什么/边界）'] || r['内容（适用条件/排除条件）'] || r['内容（映射依据）'] || r['内容（逐条检查项）'] || r['内容（案例原文 + 为什么好/坏）'] || r.content || '').trim();
-      const status = String(r['状态'] || r.status || '草稿').trim();
-      if (!type || !name) { skipped.push(name || '(无名)'); continue; }
-      if (existing.has(type + '|' + name)) { skipped.push(name); continue; }
-      storage.insert('standards', { type, name, content, version: 1, status: ['草稿', '待确认', '已生效'].includes(status) ? status : '草稿', source: '导入', effective_at: status === '已生效' ? new Date().toISOString() : null });
-      existing.add(type + '|' + name);
-      added++;
+    const r = M.importRows(storage, Array.isArray(body.rows) ? body.rows : [], { note: body.note, operator: body.operator || storage.getSetting('operator', '') });
+    if (r.error) return send(res, 400, { error: r.error });
+    send(res, 200, {
+      added: r.added, updated: r.updated, skipped: r.skipped, skipped_list: r.skipped_list,
+      total: storage.list('standards').length, versions: r.versions,
+    });
+  },
+
+  // ---------- 材料统一导入（意图库树形 JSON / 扁平行） ----------
+  // 兼容两种提交方式：① body 直接就是树形 JSON 或行数组；② 包装体 {data: ..., format: ...}
+  'POST /api/materials/import': async (req, res) => {
+    const body = await readBody(req);
+    const operator = body.operator || storage.getSetting('operator', '') || '';
+    let data = body.data !== undefined ? body.data : body;
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch (e) { return send(res, 400, { error: '内容不是合法 JSON：' + e.message }); }
     }
-    send(res, 200, { added, skipped, total: storage.list('standards').length });
+    const isTree = data && !Array.isArray(data) && Array.isArray(data.intents);
+    let r;
+    if (body.format === 'intent_tree' || (body.format === 'auto' && isTree) || (!body.format && isTree)) {
+      r = M.importIntentTree(storage, data, { note: body.note || '导入意图库（树形 JSON）', operator });
+    } else if (Array.isArray(data)) {
+      r = M.importRows(storage, data, { note: body.note || '导入材料（扁平行）', operator });
+    } else {
+      return send(res, 400, { error: '无法识别的内容格式：支持 ① {"intents":[...]} 意图库树形 JSON；② 标准/意图宽表行数组' });
+    }
+    if (r.error) return send(res, 400, { error: r.error });
+    r.total = storage.list('standards').length;
+    send(res, 200, r);
+  },
+
+  // ---------- 材料数据集与版本管理 ----------
+  'GET /api/datasets': async (req, res) => {
+    send(res, 200, { datasets: M.datasetSummary(storage) });
+  },
+
+  'GET /api/material-versions': async (req, res) => {
+    const u = new URL(req.url, 'http://x');
+    const key = u.searchParams.get('dataset') || '';
+    if (key && !M.datasetByKey(key)) return send(res, 400, { error: '未知数据集：' + key });
+    const out = key
+      ? M.getVersions(storage, key)
+      : M.DATASETS.map((d) => ({ dataset: d.key, name: d.name, versions: M.getVersions(storage, d.key) }));
+    send(res, 200, key ? { versions: out } : { by_dataset: out });
+  },
+
+  'GET /api/material-versions/:id': async (req, res, params) => {
+    const v = M.getVersionDetail(storage, params.id);
+    if (!v) return send(res, 404, { error: '版本不存在' });
+    send(res, 200, { version: v });
+  },
+
+  'POST /api/material-versions/:id/rollback': async (req, res, params) => {
+    const body = await readBody(req).catch(() => ({}));
+    const r = M.rollback(storage, params.id, { operator: body.operator || storage.getSetting('operator', '') });
+    if (r.error) return send(res, 400, { error: r.error });
+    send(res, 200, r);
+  },
+
+  // ---------- 评估助手配置（提示词 / 路由规则 / 能力清单 / 技能知识库 / 展示） ----------
+  'GET /api/agent-config': async (req, res) => {
+    send(res, 200, { config: getAgentConfig(storage) });
+  },
+
+  'PUT /api/agent-config': async (req, res) => {
+    const body = await readBody(req);
+    const cfg = body.config || body;
+    const cur = ensureAgentConfig(storage);
+    // 合并语义：未提交的字段保持原值（防止只改展示文案把提示词/能力/知识库清空）；显式提交空串/空数组才算清空
+    const pres = cfg.presentation || {};
+    const next = {
+      system_prompt: cfg.system_prompt !== undefined ? String(cfg.system_prompt).slice(0, 8000) : cur.system_prompt,
+      rules: Array.isArray(cfg.rules) ? cfg.rules.map((r) => ({ key: String(r.key || ''), name: String(r.name || ''), trigger: String(r.trigger || ''), desc: String(r.desc || ''), enabled: r.enabled !== false })).filter((r) => r.key) : cur.rules,
+      capabilities: Array.isArray(cfg.capabilities) ? cfg.capabilities.map((c) => ({ key: String(c.key || ''), name: String(c.name || ''), desc: String(c.desc || ''), enabled: c.enabled !== false })).filter((c) => c.name) : cur.capabilities,
+      knowledge: Array.isArray(cfg.knowledge) ? cfg.knowledge.map((k) => ({ id: k.id || storage.id('kn'), title: String(k.title || '').slice(0, 120), content: String(k.content || '').slice(0, 8000), updated_at: new Date().toISOString() })).filter((k) => k.title || k.content) : cur.knowledge,
+      presentation: {
+        greeting: pres.greeting !== undefined ? String(pres.greeting).slice(0, 200) : cur.presentation.greeting,
+        welcome_sub: pres.welcome_sub !== undefined ? String(pres.welcome_sub).slice(0, 500) : cur.presentation.welcome_sub,
+        help: pres.help !== undefined ? String(pres.help).slice(0, 4000) : cur.presentation.help,
+      },
+    };
+    storage.update('agent_configs', 'default', next);
+    send(res, 200, { config: getAgentConfig(storage) });
   },
 
   // ---------- 同口径复验（标准更新后重跑同一样本） ----------

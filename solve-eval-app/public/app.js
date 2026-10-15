@@ -52,6 +52,9 @@ const state = {
   allSessions: null,
   chatHistory: [],
   corrStatus: '全部',
+  matDataset: 'intents',
+  agentCfgTab: 'prompt',
+  agentCfg: null,
 };
 
 /* ============ 视图切换 ============ */
@@ -69,6 +72,7 @@ document.querySelectorAll('.nav-item').forEach((btn) => {
     if (state.view === 'standards') loadStandards();
     if (state.view === 'materials') loadMaterials();
     if (state.view === 'corrections') loadCorrections();
+    if (state.view === 'agent-config') loadAgentConfig();
     if (state.view === 'agent') renderChat();
   });
 });
@@ -824,6 +828,8 @@ const CHAT_QUICK = [
   '按意图看一下 L3 率',
   '给我分析结论',
   '我还需要提供哪些材料？',
+  '意图库的版本历史',
+  '新增意图：乘客要求导致违规，定义：因乘客要求导致的违规判罚申诉',
   '搜索会话：奖励',
   '检测这段对话：司机：奖励还没到账\n意图：奖励到账咨询\n场景：奖励到账查询\nAI建议：奖励一般三个工作日内到账，请您耐心等待',
 ];
@@ -848,8 +854,9 @@ function renderChat() {
 function renderChatMessages() {
   const list = $('chatList');
   if (!state.chatHistory.length) {
-    list.innerHTML = '<div class="chat-welcome"><div class="chat-welcome-title">我是评估助手</div>' +
-      '<div class="chat-welcome-sub">问我数据（指标/分布/队列），也让我检测一段会话，或者告诉我还缺什么材料。所有结论都能追溯到平台里的原始记录。</div></div>';
+    const pres = (state.agentCfg && state.agentCfg.presentation) || {};
+    list.innerHTML = '<div class="chat-welcome"><div class="chat-welcome-title">' + esc(pres.greeting || '我是评估助手') + '</div>' +
+      '<div class="chat-welcome-sub">' + esc(pres.welcome_sub || '问我数据（指标/分布/队列），也让我检测一段会话，或者告诉我还缺什么材料。所有结论都能追溯到平台里的原始记录。') + '</div></div>';
     return;
   }
   list.innerHTML = state.chatHistory.map((m) => {
@@ -976,22 +983,98 @@ async function loadMaterials() {
   const open = issues.issues.filter((i) => i.status !== '已关闭');
   $('matOverview').innerHTML += '<div class="pane"><h3 style="font-size:14px;font-weight:500;margin-bottom:10px">标准事项队列（' + open.length + ' 条待处理）</h3>' +
     (open.length ? open.map((i) => '<div class="issue-item"><span class="tag">' + esc(i.type) + '</span>' + (i.reason_code ? '<span class="tag tag-u">' + esc(i.reason_code) + '</span>' : '') + '<span style="flex:1">' + esc(i.description) + '</span><span class="issue-status">' + esc(i.status) + '</span></div>').join('') : '<div class="eval-reason">暂无待处理标准事项。复核台标记 U 样本时会自动生成。</div>') + '</div>';
+  loadMatVersions();
 }
 
 $('btnStdImport').addEventListener('click', async () => {
   const text = $('f_std_import').value.trim();
-  if (!text) return toast('请先粘贴模板内容');
-  let rows = null;
-  try { rows = text.startsWith('[') || text.startsWith('{') ? JSON.parse(text) : parseBatchInput(text); } catch (e) { return toast('解析失败：' + e.message); }
-  if (!Array.isArray(rows) || !rows.length) return toast('没有解析到数据行');
+  if (!text) return toast('请先粘贴导入内容');
+  let data = null;
+  try { data = text.startsWith('[') || text.startsWith('{') ? JSON.parse(text) : parseBatchInput(text); } catch (e) { return toast('解析失败：' + e.message); }
+  const isTree = data && !Array.isArray(data) && Array.isArray(data.intents);
+  if (!isTree && (!Array.isArray(data) || !data.length)) return toast('没有解析到数据行');
   try {
-    const r = await api('POST', '/api/standards/import', { rows });
-    $('stdImportResult').innerHTML = '<div class="batch-summary">导入完成：新增 ' + r.added + ' 条，跳过 ' + r.skipped.length + ' 条（重复或缺少类型/名称）' + (r.skipped.length ? '：' + r.skipped.slice(0, 8).map(esc).join('、') : '') + '。标准库现有 ' + r.total + ' 条。</div>';
-    toast('已导入 ' + r.added + ' 条标准');
+    const r = isTree
+      ? await api('POST', '/api/materials/import', { format: 'intent_tree', data })
+      : await api('POST', '/api/materials/import', { format: 'rows', data });
+    const verInfo = isTree
+      ? '，意图库版本 → v' + r.version
+      : (r.versions && Object.keys(r.versions).length ? '，受影响库版本：' + Object.entries(r.versions).map(([k, v]) => k + ' v' + v).join('、') : '');
+    $('stdImportResult').innerHTML = '<div class="batch-summary">导入完成：新增 ' + r.added + ' 条、更新 ' + (r.updated || 0) + ' 条、跳过 ' + r.skipped + ' 条' + verInfo + '。标准库现有 ' + (r.total || '') + ' 条。</div>';
+    toast('已导入 ' + r.added + ' 条');
     loadMaterials();
     refreshBadge();
   } catch (e) { toast(e.message); }
 });
+
+/* ============ 材料中心 · 版本管理 ============ */
+
+const DATASET_LABELS = { intents: '意图库', scenes: '场景库', mappings: '意图-场景映射', skills: 'Skill 库', skill_scenes: 'Skill-场景映射', cases: '正负案例', checklists: '场景检查清单', reply_rules: '业务规则', sessions: '真实会话样本' };
+
+async function loadMatVersions() {
+  const seg = $('matDatasetSeg');
+  const keys = Object.keys(DATASET_LABELS);
+  if (!state.matDataset) state.matDataset = 'intents';
+  seg.innerHTML = keys.map((k) => '<button class="seg-btn ' + (state.matDataset === k ? 'active' : '') + '" data-ds="' + k + '">' + DATASET_LABELS[k] + '</button>').join('');
+  seg.querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', () => { state.matDataset = b.dataset.ds; loadMatVersions(); }));
+  const box = $('matVersionPanel');
+  try {
+    const [dsRes, verRes] = await Promise.all([
+      api('GET', '/api/datasets'),
+      api('GET', '/api/material-versions?dataset=' + encodeURIComponent(state.matDataset)),
+    ]);
+    const ds = (dsRes.datasets || []).find((d) => d.key === state.matDataset) || {};
+    const versions = verRes.versions || [];
+    let html = '<div class="version-summary">' +
+      '<div><span class="version-num">v' + (ds.current_version || 0) + '</span><span class="version-label">当前版本</span></div>' +
+      '<div><span class="version-num">' + (ds.count || 0) + '</span><span class="version-label">记录条数（已生效 ' + (ds.effective || 0) + '）</span></div>' +
+      '<div><span class="version-num">' + (ds.versions || 0) + '</span><span class="version-label">历史版本数</span></div>' +
+      '<div style="flex:1;text-align:right;font-size:12px;color:var(--text-3)">' + (ds.last_updated ? '最近更新：' + esc(ds.last_updated.slice(0, 16).replace('T', ' ')) : '暂无版本记录') + '</div></div>';
+    if (!versions.length) {
+      html += '<div class="empty">该资料库还没有版本记录。导入或增删改后会自动生成版本。</div>';
+    } else {
+      html += '<table class="metric-table"><tr><th style="width:52px">版本</th><th>说明</th><th style="width:80px">来源</th><th style="width:110px">变更（增/改/删）</th><th style="width:70px">操作人</th><th style="width:130px">时间</th><th style="width:120px">操作</th></tr>' +
+        versions.map((v) => '<tr><td><b>v' + v.version + '</b></td>' +
+          '<td>' + esc(v.note || '') + (v.changes && v.changes.total != null ? ' <span style="color:var(--text-3);font-size:11px">（合计 ' + v.changes.total + ' 条）</span>' : '') + '</td>' +
+          '<td>' + esc(v.source || '') + '</td>' +
+          '<td><span style="color:var(--l3)">+' + (v.changes ? v.changes.added : 0) + '</span> / <span style="color:var(--accent)">~' + (v.changes ? v.changes.updated : 0) + '</span> / <span style="color:var(--l0)">-' + (v.changes ? v.changes.removed : 0) + '</span></td>' +
+          '<td>' + esc(v.operator || '—') + '</td>' +
+          '<td style="font-size:12px">' + esc((v.created_at || '').slice(0, 16).replace('T', ' ')) + '</td>' +
+          '<td><button class="btn btn-sm btn-ghost" data-verdetail="' + v.id + '">明细</button>' +
+          (v.rollbackable ? ' <button class="btn btn-sm btn-ghost btn-danger" data-verrollback="' + v.id + '" data-ver="v' + v.version + '">回滚</button>' : '') +
+          '</td></tr>').join('') + '</table>';
+      html += '<div class="field-hint" style="margin-top:10px">回滚 = 把该资料库恢复到所选版本的全量状态（回滚操作本身也会记一个新版本）。仅保留最近 30 个版本的快照；会话样本为审计记录，不回滚。</div>';
+    }
+    box.innerHTML = html;
+    box.querySelectorAll('[data-verdetail]').forEach((b) => b.addEventListener('click', () => openVersionDetail(b.dataset.verdetail)));
+    box.querySelectorAll('[data-verrollback]').forEach((b) => b.addEventListener('click', async () => {
+      if (!confirm('确认把「' + DATASET_LABELS[state.matDataset] + '」回滚到 ' + b.dataset.ver + '？当前状态会被替换（回滚本身也会记版本，可再次回滚找回）。')) return;
+      try {
+        const r = await api('POST', '/api/material-versions/' + b.dataset.verrollback + '/rollback', {});
+        toast('已回滚，恢复 ' + r.restored + ' 条，新版本 v' + r.version);
+        loadMatVersions(); loadMaterials();
+      } catch (e) { toast(e.message); }
+    }));
+  } catch (e) { box.innerHTML = '<div class="empty">版本信息加载失败：' + esc(e.message) + '</div>'; }
+}
+
+async function openVersionDetail(id) {
+  let v;
+  try { v = (await api('GET', '/api/material-versions/' + id)).version; } catch (e) { return toast(e.message); }
+  const ch = v.changes || {};
+  let html = '<div class="modal-title">「' + esc(DATASET_LABELS[v.dataset] || v.dataset) + '」v' + v.version + ' · ' + esc(v.note || '') + '</div>' +
+    '<div class="field-hint" style="margin-bottom:10px">来源：' + esc(v.source || '') + ' · 操作人：' + esc(v.operator || '—') + ' · 时间：' + esc((v.created_at || '').slice(0, 16).replace('T', ' ')) + ' · 变更：新增 ' + (ch.added || 0) + ' / 更新 ' + (ch.updated || 0) + ' / 删除 ' + (ch.removed || 0) + ' / 合计 ' + (ch.total || 0) + '</div>';
+  if (Array.isArray(v.detail) && v.detail.length) {
+    html += '<div class="ver-detail-list">' + v.detail.map((d) => '<div class="ver-detail-item"><span class="ver-act ver-act-' + d.action + '">' + (d.action === 'add' ? '新增' : d.action === 'update' ? '更新' : '删除') + '</span>' + esc(d.name || d.id) + '</div>').join('') + '</div>';
+  }
+  if (v.records) {
+    html += '<div class="field-hint" style="margin:10px 0 6px">该版本的全量记录（' + v.records.length + ' 条）：</div><div class="ver-detail-list" style="max-height:280px;overflow:auto">' +
+      v.records.map((r) => '<div class="ver-detail-item"><span class="tag">' + esc(r.status || '') + '</span>' + esc(r.name || '') + (r.intent_id ? ' <span style="color:var(--text-3);font-size:11px">#' + esc(r.intent_id) + '</span>' : '') + '</div>').join('') + '</div>';
+  } else if (v.dataset === 'sessions') {
+    html += '<div class="field-hint" style="margin-top:8px">会话样本版本为审计记录（只记录批量导入的样本变更，不保存全量快照）。</div>';
+  }
+  openModal(html + '<div class="form-actions"><button class="btn btn-ghost" onclick="closeModal()">关闭</button></div>');
+}
 
 /* ============ 纠正任务 ============ */
 
@@ -1036,7 +1119,7 @@ async function loadCorrections() {
 
 /* ============ 标准库 ============ */
 
-const STD_TYPE_LABEL = { intent_def: '意图定义', scene_def: '场景定义', mapping: '意图-场景映射', checklist: '场景检查清单', reply_rule: '回复规则', case_positive: '正案例', case_negative: '负案例' };
+const STD_TYPE_LABEL = { intent_def: '意图定义', scene_def: '场景定义', mapping: '意图-场景映射', skill_def: 'Skill 定义', skill_scene: 'Skill-场景映射', checklist: '场景检查清单', reply_rule: '回复规则', case_positive: '正案例', case_negative: '负案例' };
 
 async function loadStandards() {
   const [std, issues] = await Promise.all([api('GET', '/api/standards'), api('GET', '/api/standard-issues')]);
@@ -1093,6 +1176,111 @@ $('btnStdAdd').addEventListener('click', async () => {
   loadStandards();
 });
 
+/* ============ 助手配置 ============ */
+
+const AGENT_CFG_TABS = [
+  { key: 'prompt', name: '系统提示词' },
+  { key: 'rules', name: '路由规则' },
+  { key: 'capabilities', name: '能力清单' },
+  { key: 'knowledge', name: '技能知识库' },
+  { key: 'presentation', name: '展示文案' },
+];
+
+async function loadAgentConfig() {
+  try {
+    const r = await api('GET', '/api/agent-config');
+    state.agentCfg = r.config;
+  } catch (e) { $('agentCfgPanel').innerHTML = '<div class="empty">配置加载失败：' + esc(e.message) + '</div>'; return; }
+  const seg = $('agentCfgSeg');
+  seg.innerHTML = AGENT_CFG_TABS.map((t) => '<button class="seg-btn ' + (state.agentCfgTab === t.key ? 'active' : '') + '" data-tab="' + t.key + '">' + t.name + '</button>').join('');
+  seg.querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', () => { state.agentCfgTab = b.dataset.tab; loadAgentConfig(); }));
+  const cfg = state.agentCfg;
+  const box = $('agentCfgPanel');
+  if (state.agentCfgTab === 'prompt') {
+    box.innerHTML = '<div class="pane"><h3 style="font-size:14px;font-weight:500;margin-bottom:12px">系统提示词（大模型通道的基础指令）</h3>' +
+      '<div class="field-hint" style="margin-bottom:10px">平台数据快照、工具清单与技能知识库会在每次对话时自动附加在这段指令之后；这里维护的是助手的人设与行为基线。</div>' +
+      '<textarea id="cfg_prompt" class="ta ta-tall" style="min-height:180px">' + esc(cfg.system_prompt || '') + '</textarea>' +
+      '<div class="form-actions"><button class="btn btn-primary" id="btnCfgSavePrompt">保存提示词</button><span class="form-note">保存后对下一次大模型对话生效。</span></div></div>';
+    $('btnCfgSavePrompt').addEventListener('click', async () => {
+      try {
+        await api('PUT', '/api/agent-config', { config: Object.assign({}, cfg, { system_prompt: $('cfg_prompt').value }) });
+        toast('提示词已保存'); loadAgentConfig();
+      } catch (e) { toast(e.message); }
+    });
+  } else if (state.agentCfgTab === 'rules') {
+    box.innerHTML = '<div class="pane"><h3 style="font-size:14px;font-weight:500;margin-bottom:12px">路由规则（规则通道按顺序匹配，可单独启停）</h3>' +
+      '<div class="field-hint" style="margin-bottom:10px">关闭某条规则后，对应问法会继续向后匹配（如关闭「指标总览」，「L3 率是多少」会落到兜底）。大模型通道不受此处开关影响。</div>' +
+      '<table class="metric-table"><tr><th style="width:60px">启用</th><th style="width:110px">规则</th><th>触发词</th><th>说明</th></tr>' +
+      (cfg.rules || []).map((r, i) => '<tr><td><input type="checkbox" data-rule="' + i + '" ' + (r.enabled !== false ? 'checked' : '') + '></td>' +
+        '<td><b>' + esc(r.name) + '</b><div style="font-size:11px;color:var(--text-3)">' + esc(r.key) + '</div></td>' +
+        '<td style="font-size:12px">' + esc(r.trigger || '') + '</td><td style="font-size:12px;color:var(--text-2)">' + esc(r.desc || '') + '</td></tr>').join('') + '</table>' +
+      '<div class="form-actions"><button class="btn btn-primary" id="btnCfgSaveRules">保存规则开关</button></div></div>';
+    $('btnCfgSaveRules').addEventListener('click', async () => {
+      const rules = (cfg.rules || []).map((r, i) => Object.assign({}, r, { enabled: !!box.querySelector('[data-rule="' + i + '"]').checked }));
+      try {
+        await api('PUT', '/api/agent-config', { config: Object.assign({}, cfg, { rules }) });
+        toast('规则开关已保存'); loadAgentConfig();
+      } catch (e) { toast(e.message); }
+    });
+  } else if (state.agentCfgTab === 'capabilities') {
+    box.innerHTML = '<div class="pane"><h3 style="font-size:14px;font-weight:500;margin-bottom:12px">能力清单（帮助回复与欢迎语中展示）</h3>' +
+      '<div class="field-hint" style="margin-bottom:10px">名称与说明会展示在「帮助」回复里；勾选状态仅作为维护标记。</div>' +
+      (cfg.capabilities || []).map((c, i) => '<div class="cap-item"><input type="checkbox" data-cap="' + i + '" ' + (c.enabled !== false ? 'checked' : '') + '>' +
+        '<div style="flex:1"><input class="input" data-capname="' + i + '" value="' + esc(c.name) + '" placeholder="能力名称">' +
+        '<input class="input" data-capdesc="' + i + '" value="' + esc(c.desc) + '" placeholder="能力说明" style="margin-top:6px"></div></div>').join('') +
+      '<div class="form-actions"><button class="btn btn-ghost" id="btnCapAdd">+ 新增一项</button><button class="btn btn-primary" id="btnCfgSaveCaps">保存能力清单</button></div></div>';
+    $('btnCapAdd').addEventListener('click', () => {
+      cfg.capabilities.push({ key: 'cap_' + Date.now().toString(36), name: '', desc: '', enabled: true });
+      loadAgentConfig();
+    });
+    $('btnCfgSaveCaps').addEventListener('click', async () => {
+      const capabilities = (cfg.capabilities || []).map((c, i) => ({
+        key: c.key, name: box.querySelector('[data-capname="' + i + '"]').value.trim(), desc: box.querySelector('[data-capdesc="' + i + '"]').value.trim(),
+        enabled: !!box.querySelector('[data-cap="' + i + '"]').checked,
+      })).filter((c) => c.name);
+      try {
+        await api('PUT', '/api/agent-config', { config: Object.assign({}, cfg, { capabilities }) });
+        toast('能力清单已保存'); loadAgentConfig();
+      } catch (e) { toast(e.message); }
+    });
+  } else if (state.agentCfgTab === 'knowledge') {
+    box.innerHTML = '<div class="pane"><h3 style="font-size:14px;font-weight:500;margin-bottom:12px">技能知识库（大模型对话时自动注入）</h3>' +
+      '<div class="field-hint" style="margin-bottom:10px">把助手需要知道的业务知识、口径、常见问题答案维护在这里，每次大模型对话都会带上。</div>' +
+      (cfg.knowledge || []).map((k, i) => '<div class="kn-item"><div class="kn-head"><input class="input" data-kntitle="' + i + '" value="' + esc(k.title) + '" placeholder="条目名称">' +
+        '<button class="btn btn-sm btn-ghost btn-danger" data-kndel="' + i + '">删除</button></div>' +
+        '<textarea class="ta" data-kncontent="' + i + '" placeholder="内容" style="margin-top:6px;min-height:70px">' + esc(k.content) + '</textarea></div>').join('') +
+      (!cfg.knowledge || !cfg.knowledge.length ? '<div class="empty">还没有知识条目。</div>' : '') +
+      '<div class="form-actions"><button class="btn btn-ghost" id="btnKnAdd">+ 新增条目</button><button class="btn btn-primary" id="btnCfgSaveKn">保存知识库</button></div></div>';
+    $('btnKnAdd').addEventListener('click', () => {
+      if (!cfg.knowledge) cfg.knowledge = [];
+      cfg.knowledge.push({ id: '', title: '', content: '' });
+      loadAgentConfig();
+    });
+    box.querySelectorAll('[data-kndel]').forEach((b) => b.addEventListener('click', () => { cfg.knowledge.splice(Number(b.dataset.kndel), 1); loadAgentConfig(); }));
+    $('btnCfgSaveKn').addEventListener('click', async () => {
+      const knowledge = (cfg.knowledge || []).map((k, i) => ({
+        id: k.id, title: box.querySelector('[data-kntitle="' + i + '"]').value.trim(), content: box.querySelector('[data-kncontent="' + i + '"]').value,
+      })).filter((k) => k.title || k.content);
+      try {
+        await api('PUT', '/api/agent-config', { config: Object.assign({}, cfg, { knowledge }) });
+        toast('知识库已保存'); loadAgentConfig();
+      } catch (e) { toast(e.message); }
+    });
+  } else {
+    box.innerHTML = '<div class="pane"><h3 style="font-size:14px;font-weight:500;margin-bottom:12px">展示文案（聊天界面的问候与欢迎语）</h3>' +
+      '<label class="field-label">问候语</label><input id="cfg_greeting" class="input" value="' + esc(cfg.presentation.greeting || '') + '">' +
+      '<label class="field-label">欢迎副标题（聊天窗口空态）</label><textarea id="cfg_welcome" class="ta" style="min-height:60px">' + esc(cfg.presentation.welcome_sub || '') + '</textarea>' +
+      '<label class="field-label">帮助回复文案</label><textarea id="cfg_help" class="ta ta-tall" style="min-height:160px">' + esc(cfg.presentation.help || '') + '</textarea>' +
+      '<div class="form-actions"><button class="btn btn-primary" id="btnCfgSavePres">保存展示文案</button></div></div>';
+    $('btnCfgSavePres').addEventListener('click', async () => {
+      try {
+        await api('PUT', '/api/agent-config', { config: Object.assign({}, cfg, { presentation: { greeting: $('cfg_greeting').value, welcome_sub: $('cfg_welcome').value, help: $('cfg_help').value } }) });
+        toast('展示文案已保存'); loadAgentConfig(); renderChat();
+      } catch (e) { toast(e.message); }
+    });
+  }
+}
+
 /* ============ 设置 ============ */
 
 async function loadSettings() {
@@ -1138,6 +1326,7 @@ function autoRefresh() {
   else if (state.view === 'board') loadBoard();
   else if (state.view === 'materials') loadMaterials();
   else if (state.view === 'corrections') loadCorrections();
+  else if (state.view === 'agent-config') loadAgentConfig();
 }
 setInterval(autoRefresh, 20000);
 

@@ -314,3 +314,36 @@ input, select, textarea { font-family: inherit; color: inherit; }
   .chat-wrap { height: calc(100vh - 260px); }
   .chat-kpi { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ---------- 材料版本管理 ---------- */
+.version-summary {
+  display: flex; align-items: center; gap: 28px;
+  padding: 12px 16px; margin-bottom: 12px;
+  background: var(--accent-soft); border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.version-num { font-size: 20px; font-weight: 600; color: var(--accent-deep); margin-right: 6px; }
+.version-label { font-size: 12px; color: var(--text-2); }
+.ver-detail-list { display: flex; flex-direction: column; gap: 4px; }
+.ver-detail-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; font-size: 13px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+}
+.ver-act {
+  flex-shrink: 0; font-size: 11px; padding: 1px 7px; border-radius: 4px;
+}
+.ver-act-add { color: var(--l3); background: var(--l3-bg); }
+.ver-act-update { color: var(--accent-deep); background: var(--accent-soft); }
+.ver-act-remove { color: var(--l0); background: var(--l0-bg); }
+
+/* ---------- 助手配置 ---------- */
+.cap-item, .kn-item {
+  padding: 12px 14px; margin-bottom: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.cap-item { display: flex; align-items: flex-start; gap: 10px; }
+.cap-item input[type="checkbox"] { margin-top: 12px; }
+.kn-head { display: flex; gap: 8px; align-items: center; }
+.kn-head .input { flex: 1; }
+.modal-title { font-size: 15px; font-weight: 600; margin-bottom: 10px; }

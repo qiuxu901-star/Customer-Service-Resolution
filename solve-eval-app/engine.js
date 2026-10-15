@@ -133,7 +133,7 @@ function nameCoreMatch(name, text) {
 function evalIntent(demand, input, standards, ruleRefs) {
   const intentName = String(input.intent_name || input.intent_id || '').trim();
   const hasIntentLabel = !!intentName;
-  const def = standards.find((s) => s.type === 'intent_def' && s.status === '已生效' && (s.name === intentName || String(s.id) === String(input.intent_id)));
+  const def = standards.find((s) => s.type === 'intent_def' && s.status === '已生效' && (s.name === intentName || String(s.id) === String(input.intent_id) || (s.intent_id && String(s.intent_id) === String(input.intent_id))));
   ruleRefs.push('I3');
 
   if (!hasIntentLabel) {
@@ -162,7 +162,7 @@ function evalIntent(demand, input, standards, ruleRefs) {
 
 function evalScene(demand, input, standards, ruleRefs) {
   const sceneName = String(input.scene_name || input.scene_id || '').trim();
-  const def = standards.find((s) => s.type === 'scene_def' && s.status === '已生效' && (s.name === sceneName || String(s.id) === String(input.scene_id)));
+  const def = standards.find((s) => s.type === 'scene_def' && s.status === '已生效' && (s.name === sceneName || String(s.id) === String(input.scene_id) || (s.scene_id && String(s.scene_id) === String(input.scene_id))));
   ruleRefs.push('S3');
   if (!sceneName) {
     return { independent: 'u', conditional: 'u', conclusion: 'u', reason: '原系统未输出命中场景，检测对象信息缺失', standard_ref: null, rule_refs: ['S3'], u: { code: 'U09', item: '场景匹配', missing: '原系统场景记录', owner: '数据提供方' } };
@@ -495,10 +495,34 @@ function extractJson(text) {
   return JSON.parse(t.slice(start, end + 1));
 }
 
+// LLM 通道的标准库组装：尺子类标准（意图/场景/映射/Skill）按与本次输入的相关性展开全文，
+// 不相关的只给名称索引——意图库上百条时全量展开会撑爆 prompt 且稀释注意力。
+function buildStandardText(standards, input) {
+  const eff = standards.filter((s) => s.status === '已生效');
+  if (!eff.length) return '（标准库为空）';
+  const FILTERABLE = ['intent_def', 'scene_def', 'mapping', 'skill_def', 'skill_scene'];
+  const iName = String(input.intent_name || '').trim();
+  const sName = String(input.scene_name || '').trim();
+  const related = (s) => {
+    if (!FILTERABLE.includes(s.type)) return true;
+    const n = String(s.name || '');
+    return (iName.length >= 2 && (n.includes(iName) || iName.includes(n))) ||
+           (sName.length >= 2 && (n.includes(sName) || sName.includes(n))) ||
+           (s.intent_id && String(s.intent_id) === String(input.intent_id)) ||
+           (s.scene_id && String(s.scene_id) === String(input.scene_id));
+  };
+  const full = eff.filter(related);
+  const idxOnly = eff.filter((s) => !related(s));
+  const lines = full.map((s) => '[' + s.type + '] ' + s.name + '（v' + s.version + '）：' + s.content);
+  if (idxOnly.length) {
+    lines.push('【其余标准名称索引（与本次输入不直接相关，未展开全文）】' +
+      idxOnly.map((s) => s.type + ':' + s.name).join('；'));
+  }
+  return lines.join('\n');
+}
+
 async function runLLMEngine(input, standards, config) {
-  const standardText = standards.length
-    ? standards.filter((s) => s.status === '已生效').map((s) => '[' + s.type + '] ' + s.name + '（v' + s.version + '）：' + s.content).join('\n')
-    : '（标准库为空）';
+  const standardText = buildStandardText(standards, input);
   const userContent = [
     '【原始会话】\n' + input.session_text,
     '【系统识别意图】' + (input.intent_id || '') + ' / ' + (input.intent_name || '（未提供）'),

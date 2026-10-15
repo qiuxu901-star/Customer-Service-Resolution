@@ -26,6 +26,7 @@
       <button class="nav-item" data-view="standards"><span class="nav-idx">07</span>标准库</button>
       <button class="nav-item" data-view="corrections"><span class="nav-idx">08</span>纠正任务<span class="nav-badge" id="corrBadge"></span></button>
       <button class="nav-item" data-view="settings"><span class="nav-idx">09</span>设置</button>
+      <button class="nav-item" data-view="agent-config"><span class="nav-idx">10</span>助手配置</button>
     </nav>
     <div class="sidebar-foot">
       <div class="engine-chip" id="engineChip">引擎：规则模式</div>
@@ -180,12 +181,17 @@
       </div>
       <div class="pane">
         <h3 style="font-size:14px;font-weight:500;margin-bottom:12px">导入标准（意图定义 / 场景定义 / 映射 / 检查清单 / 回复规则 / 正负案例）</h3>
-        <textarea id="f_std_import" class="ta ta-tall" placeholder="粘贴 CSV（含表头）或 JSON 数组，例如：&#10;标准类型,名称,内容,状态&#10;意图定义,奖励未到账咨询,&quot;司机询问奖励为什么没到账。排除：金额算错&quot;,已生效"></textarea>
+        <textarea id="f_std_import" class="ta ta-tall" placeholder="支持三种格式：&#10;① 意图库树形 JSON：{&quot;intents&quot;:[{&quot;level1_id&quot;:&quot;100&quot;,&quot;level1_name&quot;:&quot;司机违规申诉&quot;,&quot;level2&quot;:[{&quot;level2_id&quot;:&quot;110&quot;,&quot;level2_name&quot;:&quot;违规判罚不认可&quot;,&quot;level3&quot;:[{&quot;level3_id&quot;:&quot;111&quot;,&quot;level3_name&quot;:&quot;乘客要求导致违规&quot;,&quot;rule&quot;:&quot;&quot;,&quot;definition&quot;:&quot;…&quot;,&quot;cases&quot;:[&quot;…&quot;]}]}]}]}&#10;② 意图库宽表行（一级意图/一级意图ID/二级意图/二级意图ID/三级意图/三级意图ID/三级意图规则/三级意图定义/三级意图典型案例）&#10;③ 标准模板 CSV 或 JSON 数组（标准类型,名称,内容,状态）"></textarea>
         <div class="form-actions">
           <button class="btn btn-primary" id="btnStdImport">解析并导入</button>
-          <span class="form-note">重复（同类型+同名称）会自动跳过；导入后默认为「草稿」，在标准库点「生效」后参与检测。</span>
+          <span class="form-note">导入自动记版本（见下方「版本管理」）；重复内容按 ID/名称更新而非跳过；新增记录默认为「草稿」，在标准库点「生效」后参与检测（意图库树形 JSON 默认按已生效导入）。</span>
         </div>
         <div id="stdImportResult"></div>
+      </div>
+      <div class="pane">
+        <h3 style="font-size:14px;font-weight:500;margin-bottom:12px">版本管理（每次导入 / 增删改都记版本，可回滚）</h3>
+        <div class="seg" id="matDatasetSeg"></div>
+        <div id="matVersionPanel"></div>
       </div>
     </section>
 
@@ -203,6 +209,8 @@
             <option value="intent_def">意图定义</option>
             <option value="scene_def">场景定义</option>
             <option value="mapping">意图-场景映射</option>
+            <option value="skill_def">Skill 定义</option>
+            <option value="skill_scene">Skill-场景映射</option>
             <option value="checklist">场景检查清单</option>
             <option value="reply_rule">回复规则</option>
             <option value="case_positive">正案例</option>
@@ -261,6 +269,16 @@
         <button class="btn btn-primary" id="btnSaveSettings">保存设置</button>
         <div class="field-hint">不配置大模型时，引擎与助手以规则模式运行：结论为启发式预判，必须经人工复核确认（G9 纪律）。</div>
       </div>
+    </section>
+
+    <!-- 10 助手配置 -->
+    <section class="view" id="view-agent-config">
+      <header class="view-head">
+        <h1>助手配置</h1>
+        <p class="view-desc">维护评估助手自身：系统提示词、路由规则（可启停）、能力清单、技能知识库、展示文案。修改即时生效——大模型通道用提示词与知识库，规则通道用路由开关与展示文案。</p>
+      </header>
+      <div class="seg" id="agentCfgSeg"></div>
+      <div id="agentCfgPanel"></div>
     </section>
   </main>
 </div>

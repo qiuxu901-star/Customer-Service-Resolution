@@ -8,19 +8,20 @@
 
 ```
 ├── solve-eval-app/          # 应用本体（Node 原生 http，零外部依赖）
-│   ├── server.js            # http 服务 + 路由 + 统计 + Agent 端点 + 模板/导入/复验
+│   ├── server.js            # http 服务 + 路由 + 统计 + Agent 端点 + 模板/导入/版本管理
 │   ├── engine.js            # 检测引擎（规则/LLM 双模式，规则清单十二段）
 │   ├── agent.js             # 评估助手（规则路由 + LLM 工具调用 + 材料就绪度 + 结论生成）
+│   ├── materials.js         # 材料数据集与版本管理（9 类资料库：版本提交/快照/回滚/导入）
 │   ├── storage.js           # JSON 文件存储层
 │   ├── standards-seed.js    # 种子标准库（示例尺子）
-│   ├── public/              # 单页应用（9 视图）
+│   ├── public/              # 单页应用（10 视图）
 │   └── README.md            # 应用详细文档（功能地图 / 纪律 / 启动）
 ├── 客服AI解决能力价值评估-业务需求及评估标准-V2.1.md   # 业务基线
 ├── 客服AI解决能力价值评估-产品需求文档PRD-V1.0.md      # 产品功能需求
 ├── 客服AI解决能力价值评估-检测规则清单-V1.0.md        # 引擎执行规则
 ├── Agent对接与数据获取说明.md                        # Agent 三种形态与 API 契约
-├── 材料提供清单与导入指引.md                          # 9 类材料与最小启动集
-├── templates/               # 7 个导入模板 CSV（与应用内下载一致）
+├── 材料提供清单与导入指引.md                          # 11 类材料与最小启动集
+├── templates/               # 10 个导入模板 CSV（与应用内下载一致）
 ├── CHANGELOG.md             # 版本变更记录
 └── .github/workflows/ci.yml # CI：语法检查 + 启动冒烟
 ```
@@ -50,7 +51,7 @@ node server.js          # Node >= 18，零依赖，无需 npm install
 | CI | push/PR 到 main 自动跑：JS 语法检查 + 服务启动冒烟（bootstrap 与 agent/chat 健康检查） |
 | 发布 | GitHub Release 对应每个 minor/major tag，发布说明摘自 CHANGELOG |
 
-当前版本：**v1.0.0**（2026-10-14 首个可运行封版，见 CHANGELOG）。
+当前版本：**v1.1.0**（2026-10-15 材料中心版本管理 + 助手配置维护 + 意图库整树导入，见 CHANGELOG）。
 
 ## 线上部署（2026-10-14）
 

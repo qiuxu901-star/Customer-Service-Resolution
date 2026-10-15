@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const COLLECTIONS = ['batches', 'sessions', 'demands', 'detections', 'reviews', 'standards', 'standard_issues', 'corrections'];
+const COLLECTIONS = ['batches', 'sessions', 'demands', 'detections', 'reviews', 'standards', 'standard_issues', 'corrections', 'material_versions', 'agent_configs'];
 
 class Storage {
   constructor(file) {
