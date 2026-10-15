@@ -8,7 +8,7 @@
 ### 修复
 
 - **大模型调用无超时控制**：`agent.js` 的 `llmChat` 原先用无超时的 fetch，当 LLM 服务端故障挂起（返回 200 头但响应体永不到来，如 2026-10-15 DeepSeek V4.1 Flash API 部分中断）时，`/api/agent/chat` 会无限等待。现增加 45 秒超时（AbortController），超时后自动降级规则引擎并明确提示"大模型 N 秒无响应（疑似服务端故障或网络中断）"
-- **部署脚本数据丢失缺陷**（scripts/deploy.sh）：① 数据目录备份路径写成 `$APP_DIR/data`，实际在 `$APP_DIR/solve-eval-app/data`，导致更新时含大模型密钥的 db.json 被 `rm -rf` 清掉；② 端口检查用服务名匹配 `ss` 输出的进程名（实际是 node）造成误报，且代码清空发生在端口检查之前。现改为：先停本服务 → 再查端口（仍被占即中止）→ 备份真实数据目录（备份失败必须中止）→ 换代码 → 恢复数据
+- **部署脚本数据丢失缺陷**（scripts/deploy.sh）：① 数据目录备份路径写成 `$APP_DIR/data`，实际在 `$APP_DIR/solve-eval-app/data`，导致更新时含大模型密钥的 db.json 被 `rm -rf` 清掉；② 端口检查用服务名匹配 `ss` 输出的进程名（实际是 node）造成误报，且代码清空发生在端口检查之前；③ `systemctl list-unit-files | grep -q` 在 pipefail 下因 grep -q 命中即退、上游收 SIGPIPE 而条件为假，导致停服务被静默跳过。现改为：无条件先停本服务 → 再查端口（仍被占即中止）→ 备份真实数据目录（备份失败必须中止）→ 换代码 → 恢复数据
 
 ## [1.0.0] - 2026-10-14
 
