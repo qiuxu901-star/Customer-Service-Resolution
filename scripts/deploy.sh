@@ -35,16 +35,19 @@ if [ ! -f "$SRC_TARBALL" ]; then
 fi
 
 # ---------- 1. 先停止本服务（防止旧进程占用端口、内存旧数据覆盖磁盘） ----------
-if systemctl list-unit-files 2>/dev/null | grep -q "^$SERVICE.service"; then
-  systemctl stop "$SERVICE" 2>/dev/null || true
-  sleep 1
-  log "已停止旧服务: $SERVICE"
-fi
+# 注意：不用 `systemctl list-unit-files | grep -q` 判断服务是否存在——
+# pipefail 下 grep -q 命中即退会令 systemctl 收 SIGPIPE，整个条件为假导致停止被跳过。
+# stop 不存在的服务本身无害，加 || true 即可。
+systemctl stop "$SERVICE" 2>/dev/null || true
+sleep 1
+log "已停止旧服务: $SERVICE"
 
 # ---------- 2. 端口占用检查（停止本服务后仍被占 = 其他进程，中止） ----------
-if ss -tlnp 2>/dev/null | grep -q ":$PORT "; then
+# 同样先捕获输出再判断，避免 pipefail + grep -q 的 SIGPIPE 坑
+LISTENERS=$(ss -tlnp 2>/dev/null | grep ":$PORT " || true)
+if [ -n "$LISTENERS" ]; then
   echo "端口 $PORT 在停止 $SERVICE 后仍被占用，请确认其他进程或换 PORT（如 PORT=8819）后重试。" >&2
-  ss -tlnp 2>/dev/null | grep ":$PORT " >&2 || true
+  echo "$LISTENERS" >&2
   exit 1
 fi
 log "端口: $PORT（空闲）"
