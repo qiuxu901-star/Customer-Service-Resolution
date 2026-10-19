@@ -1,138 +1,128 @@
 #!/usr/bin/env bash
-# Customer-Service-Resolution 部署 / 更新脚本
-# 设计原则：不影响服务器上其他项目 —— 独立目录、独立端口、独立 systemd 单元、独立日志
-# 用法：
-#   首次部署：  ./deploy.sh /path/to/csr-v1.0.0.tar.gz
-#   版本更新：  ./deploy.sh /path/to/csr-v1.1.0.tar.gz   （数据目录不动，记录保留）
-# 可用环境变量覆盖：APP_DIR / PORT / SERVICE / NODE_BIN
-# 安全约定（v1.0.1 修复后）：
-#   1. 先停止本服务再动任何文件（旧进程持端口/持内存数据）
-#   2. 数据目录 = $APP_DIR/solve-eval-app/data（含 db.json 与大模型密钥），备份失败即中止
-#   3. 停止服务后端口仍被占用 → 判定为其他进程，中止（rm -rf 之前）
-set -euo pipefail
-
+# 独立版本目录 + 外置数据目录，健康检查失败时恢复旧服务。
+# 用法：bash deploy.sh <发布包>
+# 空白数据上线：RESET_DATA=1 bash deploy.sh <发布包>（不复用旧库）
+# 隔离预检：DEPLOY_DRY_RUN=1 APP_DIR=/tmp/csr-check bash deploy.sh <发布包>
+set -Eeuo pipefail
 APP_DIR=${APP_DIR:-/opt/customer-service-resolution}
 PORT=${PORT:-8818}
 SERVICE=${SERVICE:-csr}
 NODE_BIN=${NODE_BIN:-node}
 SRC_TARBALL=${1:-}
-
-log() { echo "[deploy] $*"; }
-
-if [ "$(id -u)" -ne 0 ] && [ ! -w /etc/systemd/system ]; then
-  echo "需要 root 或 sudo 权限（写 systemd 单元）。请用 sudo 运行：sudo $0 $*" >&2
-  exit 1
-fi
-
-# ---------- 0. 参数检查 ----------
-if [ -z "$SRC_TARBALL" ]; then
-  echo "用法: $0 <封版tar包>" >&2
-  exit 1
-fi
-if [ ! -f "$SRC_TARBALL" ]; then
-  echo "找不到封版包: $SRC_TARBALL" >&2
-  exit 1
-fi
-
-# ---------- 1. 先停止本服务（防止旧进程占用端口、内存旧数据覆盖磁盘） ----------
-# 注意：不用 `systemctl list-unit-files | grep -q` 判断服务是否存在——
-# pipefail 下 grep -q 命中即退会令 systemctl 收 SIGPIPE，整个条件为假导致停止被跳过。
-# stop 不存在的服务本身无害，加 || true 即可。
-systemctl stop "$SERVICE" 2>/dev/null || true
-sleep 1
-log "已停止旧服务: $SERVICE"
-
-# ---------- 2. 端口占用检查（停止本服务后仍被占 = 其他进程，中止） ----------
-# 同样先捕获输出再判断，避免 pipefail + grep -q 的 SIGPIPE 坑
-LISTENERS=$(ss -tlnp 2>/dev/null | grep ":$PORT " || true)
-if [ -n "$LISTENERS" ]; then
-  echo "端口 $PORT 在停止 $SERVICE 后仍被占用，请确认其他进程或换 PORT（如 PORT=8819）后重试。" >&2
-  echo "$LISTENERS" >&2
-  exit 1
-fi
-log "端口: $PORT（空闲）"
-
-# ---------- 3. 代码落地（先备份数据目录，备份失败必须中止） ----------
-DATA_DIR="$APP_DIR/solve-eval-app/data"
-DATA_BAK=""
-if [ -d "$DATA_DIR" ]; then
-  DATA_BAK=$(mktemp -d)
-  if ! cp -r "$DATA_DIR" "$DATA_BAK/data"; then
-    echo "数据目录备份失败（$DATA_DIR），已中止部署，未动任何文件。" >&2
-    rm -rf "$DATA_BAK"
-    exit 1
+DEPLOY_DRY_RUN=${DEPLOY_DRY_RUN:-0}
+RESET_DATA=${RESET_DATA:-0}
+BIND_HOST=${BIND_HOST:-127.0.0.1}
+SYSTEMD_UNIT_DIR=${SYSTEMD_UNIT_DIR:-/etc/systemd/system}
+RUN_USER=${SUDO_USER:-$(id -un)}
+log(){ echo "[deploy] $*"; }
+if [ -z "$SRC_TARBALL" ] || [ ! -f "$SRC_TARBALL" ]; then echo '请提供存在的发布包' >&2; exit 1; fi
+if [[ "$APP_DIR" != /* || "$APP_DIR" = / || "$APP_DIR" =~ [[:space:]] ]]; then echo '部署目录必须为无空白的绝对路径且不能为根目录' >&2; exit 1; fi
+if [[ ! "$SERVICE" =~ ^[a-zA-Z0-9_-]+$ || ! "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then echo '服务名称或端口无效' >&2; exit 1; fi
+if [[ ! "$RESET_DATA" =~ ^[01]$ || ! "$DEPLOY_DRY_RUN" =~ ^[01]$ ]]; then echo 'RESET_DATA 和 DEPLOY_DRY_RUN 只能为 0 或 1' >&2; exit 1; fi
+if [[ "$BIND_HOST" != 127.0.0.1 && "$BIND_HOST" != 0.0.0.0 ]]; then echo 'BIND_HOST 只能为 127.0.0.1 或 0.0.0.0' >&2; exit 1; fi
+if ! NODE_BIN=$(command -v "$NODE_BIN"); then echo '未找到Node' >&2; exit 1; fi
+NODE_MAJOR=$("$NODE_BIN" -p 'Number(process.versions.node.split(".")[0])')
+if [ "$NODE_MAJOR" -lt 18 ]; then echo '需要Node >=18' >&2; exit 1; fi
+if [ "$DEPLOY_DRY_RUN" != 1 ] && [ ! -w "$SYSTEMD_UNIT_DIR" ]; then echo '需要systemd配置写入权限' >&2; exit 1; fi
+if [ -e "$APP_DIR/current" ] && [ ! -L "$APP_DIR/current" ]; then echo 'current 必须为符号链接' >&2; exit 1; fi
+mkdir -p "$APP_DIR/releases" "$APP_DIR/backups"
+RELEASE=$(mktemp -d "$APP_DIR/releases/release-XXXXXXXX")
+ARCHIVE_LIST="$RELEASE/archive-paths.txt"
+tar -tzf "$SRC_TARBALL" > "$ARCHIVE_LIST"
+if awk '/^\// || /(^|\/)\.\.(\/|$)/ {bad=1} END {exit !bad}' "$ARCHIVE_LIST"; then echo '发布包含不安全路径' >&2; exit 1; fi
+rm "$ARCHIVE_LIST"
+tar -xzf "$SRC_TARBALL" -C "$RELEASE" --strip-components=1
+if [ ! -f "$RELEASE/solve-eval-app/server.js" ]; then echo '发布包结构无效' >&2; exit 1; fi
+if [ -e "$RELEASE/solve-eval-app/data" ] || [ -L "$RELEASE/solve-eval-app/data" ]; then echo '发布包不得包含运行数据目录' >&2; exit 1; fi
+for file in "$RELEASE"/solve-eval-app/*.js; do "$NODE_BIN" --check "$file"; done
+if [ "$DEPLOY_DRY_RUN" = 1 ]; then log "发布包预检通过；未停止服务、修改运行数据或切换版本。候选目录：$RELEASE"; exit 0; fi
+PREVIOUS=$(readlink "$APP_DIR/current" 2>/dev/null || true)
+CURRENT_DATA=$(readlink "$APP_DIR/current/solve-eval-app/data" 2>/dev/null || true)
+UNIT_FILE="$SYSTEMD_UNIT_DIR/$SERVICE.service"
+HAD_UNIT=0
+WAS_ACTIVE=0
+BACKUP=$(mktemp -d "$APP_DIR/backups/deploy-XXXXXXXX")
+chmod 700 "$BACKUP"
+if [ -e "$UNIT_FILE" ]; then cp -p "$UNIT_FILE" "$BACKUP/service.unit"; HAD_UNIT=1; fi
+if systemctl is-active --quiet "$SERVICE"; then WAS_ACTIVE=1; fi
+rollback(){
+  trap - ERR
+  set +e
+  systemctl stop "$SERVICE"
+  if [ -n "$PREVIOUS" ]; then
+    ln -s "$PREVIOUS" "$APP_DIR/current.rollback.$$"
+    mv -Tf "$APP_DIR/current.rollback.$$" "$APP_DIR/current"
+  elif [ -L "$APP_DIR/current" ]; then
+    rm "$APP_DIR/current"
   fi
-  log "已备份数据目录: $DATA_DIR"
-fi
-mkdir -p "$APP_DIR"
-rm -rf "${APP_DIR:?}/"*
-tar -xzf "$SRC_TARBALL" -C "$APP_DIR" --strip-components=1
-if [ -n "$DATA_BAK" ]; then
-  mkdir -p "$APP_DIR/solve-eval-app"
-  rm -rf "$APP_DIR/solve-eval-app/data"
-  mv "$DATA_BAK/data" "$APP_DIR/solve-eval-app/data"
-  rm -rf "$DATA_BAK"
-  log "已恢复原有数据目录（记录与大模型配置保留）"
+  if [ "$HAD_UNIT" = 1 ]; then cp -p "$BACKUP/service.unit" "$UNIT_FILE"; else rm -f "$UNIT_FILE"; fi
+  systemctl daemon-reload
+  if [ "$WAS_ACTIVE" = 1 ]; then systemctl restart "$SERVICE"; fi
+  log '部署失败，已恢复旧版本链接和服务配置；旧业务数据未删除'
+  exit 1
+}
+trap 'rollback' ERR
+LOAD_STATE=$(systemctl show "$SERVICE" -p LoadState --value)
+if [ "$LOAD_STATE" != not-found ]; then systemctl stop "$SERVICE"; fi
+# 服务停止后再备份或迁移，避免旧进程在切换期间写入数据。
+"$NODE_BIN" - "$PORT" <<'NODE'
+const net=require('node:net');
+const server=net.createServer();
+server.once('error',error=>{console.error('目标端口不可用：'+error.message);process.exitCode=1;});
+server.listen(Number(process.argv[2]),'0.0.0.0',()=>server.close());
+NODE
+LEGACY_DATA="$APP_DIR/solve-eval-app/data"
+DATA_DIR="$APP_DIR/data"
+if [[ "$CURRENT_DATA" = "$APP_DIR/"* ]]; then DATA_DIR="$CURRENT_DATA"; fi
+if [ "$RESET_DATA" = 1 ]; then
+  DATA_DIR="$APP_DIR/data-$(basename "$RELEASE")"
+  mkdir "$DATA_DIR"
+  log '本次使用全新数据目录，旧方案、评级记录及模型配置不沿用'
 else
-  log "首次部署：数据目录为空，启动后自动初始化"
+  mkdir -p "$DATA_DIR"
+  if [ -z "$PREVIOUS" ] && [ -f "$LEGACY_DATA/db.json" ]; then
+    if [ -f "$DATA_DIR/db.json" ] && ! cmp -s "$LEGACY_DATA/db.json" "$DATA_DIR/db.json"; then echo '新旧数据目录均有不同数据，迁移中止' >&2; false; fi
+    cp -p "$LEGACY_DATA/db.json" "$BACKUP/legacy-db.json"
+    if [ ! -f "$DATA_DIR/db.json" ]; then cp -p "$LEGACY_DATA/db.json" "$DATA_DIR/db.json"; fi
+  fi
+  if [ -f "$DATA_DIR/db.json" ]; then
+    "$NODE_BIN" -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$DATA_DIR/db.json"
+    cp -p "$DATA_DIR/db.json" "$BACKUP/db.json"
+  fi
 fi
-cd "$APP_DIR/solve-eval-app"
-
-# ---------- 4. Node 运行时检查 ----------
-if ! command -v "$NODE_BIN" >/dev/null 2>&1; then
-  echo "未找到 node。请先安装 Node >= 18，或设置 NODE_BIN 指向可用 node。" >&2
-  exit 1
-fi
-NODE_MAJOR=$("$NODE_BIN" -v | cut -d. -f1 | tr -d 'v')
-if [ "$NODE_MAJOR" -lt 18 ]; then
-  echo "Node 版本过低（$($NODE_BIN -v)），需要 >= 18。可设置 NODE_BIN 指向新版 node。" >&2
-  exit 1
-fi
-log "Node: $($NODE_BIN -v)"
-
-# ---------- 5. systemd 单元（独立服务，不动其他单元） ----------
-cat > "/etc/systemd/system/$SERVICE.service" <<EOF
+chmod 700 "$DATA_DIR"
+chown "$RUN_USER" "$DATA_DIR"
+chmod 755 "$RELEASE"
+ln -s "$DATA_DIR" "$RELEASE/solve-eval-app/data"
+ln -s "$RELEASE" "$APP_DIR/current.next.$$"
+mv -Tf "$APP_DIR/current.next.$$" "$APP_DIR/current"
+cat > "$UNIT_FILE" <<UNIT
 [Unit]
-Description=Customer Service Resolution (客服 AI 解决能力价值评估)
+Description=Customer Service Resolution
 After=network.target
-
 [Service]
 Type=simple
-User=$( [ "$(id -u)" -eq 0 ] && echo "${SUDO_USER:-root}" || echo "$(id -un)" )
-WorkingDirectory=$APP_DIR/solve-eval-app
+User=$RUN_USER
+WorkingDirectory=$APP_DIR/current/solve-eval-app
 ExecStart=$NODE_BIN server.js
 Environment=PORT=$PORT
-Environment=HOST=0.0.0.0
+Environment=HOST=$BIND_HOST
+Environment=CSR_DATA_DIR=$DATA_DIR
 Restart=always
 RestartSec=3
-StandardOutput=append:$APP_DIR/server.log
-StandardError=append:$APP_DIR/server.log
-
 [Install]
 WantedBy=multi-user.target
-EOF
+UNIT
 systemctl daemon-reload
-systemctl enable "$SERVICE" >/dev/null 2>&1
+systemctl enable "$SERVICE"
 systemctl restart "$SERVICE"
-log "systemd 服务已启动: $SERVICE"
-
-# ---------- 6. 防火墙放行（尽力而为，失败不阻断） ----------
-if command -v ufw >/dev/null 2>&1 && ufw status >/dev/null 2>&1; then
-  ufw allow "$PORT/tcp" >/dev/null 2>&1 && log "ufw 已放行 $PORT/tcp" || log "ufw 放行失败，请手动检查"
-elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
-  firewall-cmd --permanent --add-port="$PORT/tcp" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1 && log "firewalld 已放行 $PORT/tcp" || log "firewalld 放行失败，请手动检查"
-else
-  log "未检测到 ufw/firewalld；若服务器在云厂商控制台，请在安全组放行 $PORT/tcp"
-fi
-
-# ---------- 7. 健康检查 ----------
-sleep 2
-if curl -sf "http://localhost:$PORT/api/bootstrap" >/dev/null; then
-  IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-  log "部署成功 → http://${IP:-<服务器IP>}:$PORT"
-  log "管理: systemctl status|restart|stop $SERVICE · 日志: tail -f $APP_DIR/server.log"
-else
-  echo "健康检查失败，最近日志：" >&2
-  journalctl -u "$SERVICE" -n 20 --no-pager >&2 || tail -20 "$APP_DIR/server.log" >&2
-  exit 1
-fi
+for attempt in 1 2 3 4 5; do
+  if curl --max-time 5 -sf "http://127.0.0.1:$PORT/api/monitor" >/dev/null; then
+    trap - ERR
+    log "新版本健康检查通过；代码：${RELEASE}；数据：${DATA_DIR}"
+    exit 0
+  fi
+  sleep 1
+done
+echo '新版本健康检查失败' >&2
+false
