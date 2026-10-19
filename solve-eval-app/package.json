@@ -1,11 +1,18 @@
 {
   "name": "customer-service-resolution",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
   "description": "客服 AI 解决能力价值评估平台（解决力评估）：对话取数、会话检测、人工复核、数据看板、材料就绪度追踪",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test tests/*.test.cjs",
+    "test:http": "node tests/http-smoke.cjs",
+    "test:models:http": "node tests/model-http.cjs",
+    "test:workspace:http": "node tests/workspace-http.cjs",
+    "test:evaluator:http": "node tests/evaluator-http.cjs",
+    "test:learning:http": "node tests/learning-http.cjs",
+    "test:deploy": "node tests/deploy-smoke.cjs"
   },
   "engines": {
     "node": ">=18"

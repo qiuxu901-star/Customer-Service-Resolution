@@ -143,19 +143,7 @@ function evalIntent(demand, input, standards, ruleRefs) {
     // I3：无意图定义及边界标准时，不得仅凭标签字面意思正式判定
     return { conclusion: 'u', error_type: 'standard_unclear', reason: '标准库中无该意图的定义及适用边界，按 I3 仅记录现象不正式判定', standard_ref: null, rule_refs: ['I3'], u: { code: 'U01', item: '主意图准确性', missing: '意图「' + intentName + '」的定义与边界标准', owner: '业务规则负责人' } };
   }
-  const score = nameCoreMatch(def.name, demand.description);
-  if (score >= 0.35) {
-    return { conclusion: 'correct', error_type: null, reason: '原意图与真实主诉求在标准定义范围内匹配（核心词覆盖 ' + score.toFixed(2) + '）', standard_ref: def.id + '@' + def.version, rule_refs: ['I2'], u: null };
-  }
-  // I4/B1：次诉求未被识别——原系统多意图支持情况未知时，记录为覆盖能力差距，不计入识别错误
-  if (!demand.is_primary) {
-    return {
-      conclusion: 'missed', error_type: 'omission',
-      reason: '次诉求「' + demand.description.slice(0, 24) + '」未被原意图覆盖。原系统是否设计为多意图识别未知，按 I4/B1 记录为覆盖能力差距（待确认），不计入模型识别错误',
-      standard_ref: def.id + '@' + def.version, rule_refs: ['I4', 'B1'], u: null,
-    };
-  }
-  return { conclusion: 'wrong', error_type: 'recognition_error', reason: '原意图与真实主诉求不匹配（核心词覆盖 ' + score.toFixed(2) + '），存在更明确适用的诉求指向', standard_ref: def.id + '@' + def.version, rule_refs: ['I2'], u: null };
+  return { conclusion: 'u', error_type: 'standard_unclear', reason: '已登记意图文本；缺少可执行的适用/排除边界，不能用名称相似度确认正确', standard_ref: def.id + '@' + def.version, rule_refs: ['I3'], u: { code: 'U01', item: '意图边界核验', missing: '结构化适用与排除条件', owner: '业务规则负责人' } };
 }
 
 // ---------- S1-S7 场景检测 ----------
@@ -171,10 +159,7 @@ function evalScene(demand, input, standards, ruleRefs) {
     // S3：不得因场景名称与意图名称相似判定匹配正确
     return { independent: 'u', conditional: 'u', conclusion: 'u', reason: '标准库中无该场景的定义，按 S3 不因名称相似判定匹配', standard_ref: null, rule_refs: ['S3'], u: { code: 'U02', item: '场景匹配', missing: '场景「' + sceneName + '」的定义', owner: '业务规则负责人' } };
   }
-  const sim = nameCoreMatch(def.name, demand.description);
-  const independent = sim >= 0.35 ? 'correct' : 'wrong';
-  const conditional = independent;
-  return { independent, conditional, conclusion: independent, reason: '按真实诉求独立判断场景匹配（核心词覆盖 ' + sim.toFixed(2) + '）', standard_ref: def.id + '@' + def.version, rule_refs: ['S1', 'S3'], u: null };
+  return { independent: 'u', conditional: 'u', conclusion: 'u', reason: '已登记场景文本；缺少可执行适用条件，不能用名称相似度确认匹配', standard_ref: def.id + '@' + def.version, rule_refs: ['S3'], u: { code: 'U02', item: '场景边界核验', missing: '结构化场景适用条件', owner: '业务规则负责人' } };
 }
 
 // ---------- D1-D12 七维度 ----------
@@ -380,6 +365,8 @@ function runRuleEngine(input, standards) {
     const intentEval = evalIntent(d, input, standards, ruleRefs);
     const sceneEval = evalScene(d, input, standards, ruleRefs);
     const solution = evalSolution(input.ai_reply, sessionText, d, standards, ruleRefs);
+    // 文本措辞不证明事实或规则正确。旧启发式模式不能输出已确认L3。
+    solution.u_reasons.push({ code: 'U06', item: '事实与规则核验', missing: '结构化底单与场景规则执行结果', owner: '业务规则及数据提供方' });
     // 意图/场景检测的 U 并入方案级 U 原因（G2：任一关键维度缺必要证据 → 整体 U）
     for (const u of [intentEval.u, sceneEval.u]) {
       if (u && u.code && !solution.u_reasons.some((x) => x.code === u.code)) solution.u_reasons.push(u);
@@ -539,6 +526,27 @@ async function runLLMEngine(input, standards, config) {
   const parsed = extractJson(raw);
   if (parsed.need_input) {
     return { status: 'need_input', questions: parsed.questions || [], mode: 'llm' };
+  }
+  if (!Array.isArray(parsed.demands) || !parsed.demands.length || !parsed.solution_eval ||
+      !['L0','L1','L2','L3','U'].includes(parsed.solution_eval.overall_level)) {
+    throw new Error('模型报告缺少有效诉求或评级字段');
+  }
+  const evaluation = parsed.solution_eval;
+  const errors = evaluation.key_errors || [];
+  if (!Array.isArray(errors) || !Array.isArray(evaluation.u_reasons || [])) throw new Error('模型报告证据字段格式错误');
+  if (evaluation.dimensions?.risk?.level === 'fail' || errors.length) {
+    evaluation.overall_level = 'L0';
+    evaluation.level_reason = '服务端约束：模型报告包含关键错误，禁止同时评级L3；仍需人工核对证据';
+  } else if ((evaluation.u_reasons || []).length) {
+    evaluation.overall_level = 'U';
+  } else if (evaluation.overall_level === 'L3') {
+    evaluation.overall_level = 'U';
+    evaluation.u_reasons = [{ code: 'U06', item: '事实与规则核验', missing: '此文本评估入口未提供结构化底单核验记录', owner: '数据提供方' }];
+    evaluation.level_reason = '模型文本判断不能单独确认完整方案，需核对底单和有效规则';
+  }
+  // 旧报告只有一套方案评价，多个诉求不得复制同一评价冒充独立结论。
+  if (parsed.demands.length > 1) {
+    throw new Error('多诉求需要独立评价结果，旧版模型报告不能共享一套结论');
   }
   // 规整为统一报告结构
   const demands = (parsed.demands || []).map((d, i) => ({

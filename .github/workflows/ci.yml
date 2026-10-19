@@ -21,14 +21,28 @@ jobs:
 
       - name: JS 语法检查
         run: |
-          for f in server.js engine.js agent.js storage.js standards-seed.js public/app.js; do
-            node --check "$f" && echo "OK $f"
-          done
+          find . -path './data' -prune -o -name '*.js' -print0 | xargs -0 -n 1 node --check
+          bash -n ../scripts/deploy.sh
+
+      - name: 证据核验、版本和复验测试
+        run: npm test
+
+      - name: 监测工作台API闭环测试
+        run: |
+          npm run test:http
+          npm run test:models:http
+          npm run test:workspace:http
+          npm run test:evaluator:http
+          npm run test:learning:http
+
+      - name: 空白部署、后续升级和失败恢复演练
+        run: npm run test:deploy
 
       - name: 服务启动冒烟
         run: |
           node server.js &
           SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
           sleep 2
           curl -sf http://localhost:8817/api/bootstrap > /dev/null && echo "bootstrap OK"
           curl -sf http://localhost:8817/api/materials > /dev/null && echo "materials OK"
@@ -36,3 +50,28 @@ jobs:
             -H 'Content-Type: application/json' \
             -d '{"message":"当前完整方案可交付率是多少？"}' > /dev/null && echo "agent OK"
           kill $SERVER_PID
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: 创建版本和发布包
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p 'require("./solve-eval-app/package.json").version')
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          TAG="v$VERSION"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; keep the published version immutable."
+            exit 0
+          fi
+          PACKAGE="$RUNNER_TEMP/csr-$TAG.tar.gz"
+          git archive --format=tar.gz --prefix=customer-service-resolution/ --output="$PACKAGE" HEAD solve-eval-app scripts README.md CHANGELOG.md templates
+          (cd "$RUNNER_TEMP" && sha256sum "csr-$TAG.tar.gz" > "csr-$TAG.tar.gz.sha256")
+          awk -v version="$VERSION" '$0 ~ "^## \\[" version "\\]" {found=1; next} found && /^## / {exit} found {print}' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+          gh release create "$TAG" "$PACKAGE" "$PACKAGE.sha256" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"

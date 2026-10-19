@@ -9,17 +9,20 @@ const path = require('path');
 const { Storage } = require('./storage');
 const { analyze, parseMessages, mergeSupplements } = require('./engine');
 const { seedStandards } = require('./standards-seed');
+const { createMonitoring } = require('./monitoring');
+const { generateMonitoringPlan, replayServiceSkill } = require('./model-bridge');
 const { createAgent, getAgentConfig, ensureAgentConfig } = require('./agent');
 const M = require('./materials');
 
 const PORT = Number(process.env.PORT || 8817);
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
-const DATA_DIR = path.join(ROOT, 'data');
+const DATA_DIR = path.resolve(process.env.CSR_DATA_DIR || path.join(ROOT, 'data'));
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const storage = new Storage(path.join(DATA_DIR, 'db.json'));
 seedStandards(storage);
+const modelConfigs = require('./model-configs').createModelConfigs({storage});
 ensureAgentConfig(storage);
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -827,20 +830,85 @@ function parseRoute(method, url) {
   return null;
 }
 
+const monitor = createMonitoring({storage,getLlmConfig:selection=>modelConfigs.resolve(selection),modelGenerate:generateMonitoringPlan,modelReplay:replayServiceSkill});
+const sceneRegistry = require('./scenes').createScenes({storage});
+const evaluatorSkill = require('./evaluator-skill').createEvaluatorSkill({storage});
+let monitorLearning;
+const batchRating = require('./batch-rating').createBatchRating({storage,onCompleted:()=>monitorLearning?.collect(),evaluatorSkill,monitor,scenes:sceneRegistry,getLlmConfig:selection=>modelConfigs.resolve(selection)});
+monitorLearning = require('./monitor-learning').createMonitorLearning({storage,monitor,scenes:sceneRegistry,startTrial:body=>batchRating.startPlanTrial(body)});
+const workspaceAgent = require('./workspace-agent').createWorkspaceAgent({storage,modelConfigs,getBatchRoutingReview:id=>batchRating.routingReview(id)});
+function evaluatorPublicState(){const {VERSION,SYSTEM,OUTPUT_CONTRACT,PROMPT_HASH}=require('./llm-rating');return {...evaluatorSkill.bootstrap(),system_protocol:{version:VERSION,system_prompt:SYSTEM,output_contract:OUTPUT_CONTRACT,prompt_hash:PROMPT_HASH}};}
+const monitorRoutes = {
+  'POST /api/monitor/learning/collect': async () => {monitorLearning.collect();return monitorLearning.bootstrap();},
+  'POST /api/monitor/learning/drafts': async body => ({draft:monitorLearning.draft(body)}),
+  'PATCH /api/monitor/learning/drafts/:id': async (body,p) => ({draft:monitorLearning.saveDraft(p.id,body)}),
+  'POST /api/monitor/learning/drafts/:id/trial': async (body,p) => ({trial:monitorLearning.trial(p.id,body)}),
+  'POST /api/monitor/learning/drafts/:id/activate': async (body,p) => ({draft:monitorLearning.activate(p.id,body)}),
+  'GET /api/monitor/evaluator-skill': async () => evaluatorPublicState(),
+  'POST /api/monitor/evaluator-skill/revisions': async body => ({revision:evaluatorSkill.save(body)}),
+  'POST /api/monitor/evaluator-skill/revisions/:id/activate': async (body,p) => ({revision:evaluatorSkill.activate(p.id,body)}),
+  'POST /api/monitor/evaluator-skill/trials': async body => ({trial:batchRating.startEvaluatorTrial(body)}),
+  'GET /api/monitor/evaluator-skill/trials/:id': async (body,p) => ({trial:batchRating.getEvaluatorTrial(p.id)}),
+  'GET /api/monitor/conversations': async () => ({conversations:workspaceAgent.list()}),
+  'POST /api/monitor/conversations': async body => ({conversation:workspaceAgent.create(body)}),
+  'GET /api/monitor/conversations/:id': async (body,p) => ({conversation:workspaceAgent.read(p.id)}),
+  'POST /api/monitor/conversations/:id/messages': async (body,p) => ({conversation:await workspaceAgent.send(p.id,body)}),
+  'POST /api/monitor/conversations/:id/batches': async (body,p) => ({conversation:workspaceAgent.attachBatch(p.id,body)}),
+  'GET /api/monitor': async () => ({...monitor.bootstrap(),...batchRating.bootstrap(),...sceneRegistry.bootstrap(),model_config:modelConfigs.state(),model_configured:modelConfigs.state().configured,rating_reviews:storage.list('monitor_rating_reviews'),evaluator_skill:evaluatorPublicState(),monitor_learning:monitorLearning.bootstrap(),skill_improvement_version:'customer-skill-improvement/v1'}),
+  'POST /api/monitor/ratings/:id/review': async (body,p) => {const review=workspaceAgent.reviewRating(p.id,body);try{monitorLearning.collect();return {review};}catch{return {review,learning_error:'复核已保存，检查建议暂未整理，可稍后重试'};}},
+  'POST /api/monitor/ratings/:id/tasks': async (body,p) => ({task:workspaceAgent.createRatingTask(p.id,body)}),
+  'PATCH /api/monitor/rating-tasks/:id': async (body,p) => ({task:workspaceAgent.updateRatingTask(p.id,body)}),
+  'GET /api/monitor/models': async () => modelConfigs.state(),
+  'POST /api/monitor/models': async body => ({profile:modelConfigs.save(body)}),
+  'PATCH /api/monitor/models/:id': async (body,p) => ({profile:modelConfigs.save(body,p.id)}),
+  'DELETE /api/monitor/models/:id': async (body,p) => modelConfigs.remove(p.id,body),
+  'POST /api/monitor/model-default': async body => modelConfigs.setDefault(body),
+  'POST /api/monitor/model-test': async body => modelConfigs.test(body),
+  'POST /api/monitor/models/:id/discover': async (body,p) => modelConfigs.discover(p.id),
+  'POST /api/monitor/plans': async body => ({revision:monitor.savePlan(sceneRegistry.attach(body))}),
+  'PATCH /api/monitor/plans/:id': async (body,p) => ({revision:monitor.savePlan(sceneRegistry.attach(body),p.id)}),
+  'POST /api/monitor/plans/:id/confirm': async (body,p) => ({revision:monitor.confirm(p.id,body)}),
+  'POST /api/monitor/plans/:id/generate': async (body,p) => ({candidate:await monitor.generate(p.id,body)}),
+  'POST /api/monitor/candidates/:id/approve': async (body,p) => ({candidate:monitor.approve(p.id,body)}),
+  'POST /api/monitor/cases': async body => {const batch=batchRating.importBatch({name:'手工登记 · '+body.name,source_kind:'manual',source_name:'页面登记',request_id:body.request_id||require('crypto').randomUUID(),actor:body.actor,scene_id:body.scene_id,scope:body.scope,candidate_id:body.candidate_id,records:[body]});const item=storage.list('monitor_batch_items').find(i=>i.batch_id===batch.id);if(!item?.case_id){const error=Error(item?.error||'材料导入失败');error.statusCode=400;throw error;}return {batch,sample:storage.byId('monitor_cases',item.case_id)};},
+  'POST /api/monitor/scenes': async body => ({scene:sceneRegistry.save(body)}),
+  'PATCH /api/monitor/scenes/:id': async (body,p) => ({scene:sceneRegistry.save(body,p.id)}),
+  'POST /api/monitor/scenes/:id/map': async (body,p) => sceneRegistry.mapLegacy(p.id,body),
+  'POST /api/monitor/examples': async body => ({example:sceneRegistry.example(body)}),
+  'POST /api/monitor/batches/preview': async body => batchRating.preview(body),
+  'POST /api/monitor/batch-items/:id/resolve': async (body,p) => ({routing:batchRating.resolveItem(p.id,body)}),
+  'POST /api/monitor/batches': async body => ({batch:batchRating.importBatch(body)}),
+  'GET /api/monitor/batches/:id/routing': async (body,p) => batchRating.routingReview(p.id),
+  'POST /api/monitor/batches/:id/routing/refresh': async (body,p) => batchRating.refreshRouting(p.id,body),
+  'POST /api/monitor/batches/:id/routing/group': async (body,p) => batchRating.resolveGroup(p.id,body),
+  'POST /api/monitor/batches/:id/routing/confirm': async (body,p) => ({confirmation:batchRating.confirmRouting(p.id,body)}),
+  'GET /api/monitor/rating-runs/:id': async (body,p) => ({run:batchRating.getRatingRun(p.id)}),
+  'POST /api/monitor/batches/:id/rate': async (body,p) => ({run:batchRating.evaluate(p.id,body)}),
+  'POST /api/monitor/services': async body => ({service:monitor.importService(sceneRegistry.attach(body))}),
+  'POST /api/monitor/evaluate': async body => ({run:monitor.evaluate(body)}),
+  'POST /api/monitor/compare': async body => ({run:monitor.compare(body)}),
+  'POST /api/monitor/replay': async body => ({run:await monitor.replay(body)}),
+  'POST /api/monitor/tasks': async body => ({task:monitor.task(body)}),
+  'PATCH /api/monitor/tasks/:id': async (body,p) => ({task:monitor.updateTask(p.id,body)}),
+};
+for(const [route,handler] of Object.entries(monitorRoutes))routes[route]=async (req,res,params)=>send(res,200,await handler(req.method==='GET'?{}:await readBody(req),params));
+
 const server = http.createServer(async (req, res) => {
   try {
     const route = parseRoute(req.method, req.url);
     if (route) return await route.handler(req, res, route.params);
+    if(req.url.split('?')[0].startsWith('/api/'))return send(res,404,{error:'接口不存在：'+req.method+' '+req.url.split('?')[0]+'，请确认服务已更新。'});
     // 静态文件
     let fp = req.url.split('?')[0];
-    if (fp === '/') fp = '/index.html';
+    if (fp === '/') fp = '/workbench.html';
+    if (fp === '/legacy') fp = '/index.html';
     const abs = path.normalize(path.join(PUBLIC, fp));
     if (!abs.startsWith(PUBLIC)) { res.writeHead(403); return res.end('forbidden'); }
     if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) { res.writeHead(404); return res.end('not found'); }
     res.writeHead(200, { 'Content-Type': MIME[path.extname(abs)] || 'application/octet-stream' });
     fs.createReadStream(abs).pipe(res);
   } catch (e) {
-    send(res, 500, { error: e.message });
+    send(res, e.statusCode || 500, { error: e.message });
   }
 });
 
@@ -855,9 +923,10 @@ function lanAddresses() {
   return out;
 }
 
-server.listen(PORT, process.env.HOST || '0.0.0.0', () => {
-  console.log('解决力评估应用已启动（局域网共享模式）:');
+const HOST = process.env.HOST || '127.0.0.1';
+server.listen(PORT, HOST, () => {
+  console.log('解决力评估应用已启动（' + (HOST === '127.0.0.1' ? '本机模式' : '指定网络模式') + '）:');
   console.log('  本机:  http://localhost:' + PORT);
-  for (const ni of lanAddresses()) console.log('  局域网: http://' + ni.address + ':' + PORT + '   [' + ni.name + ']');
+  if (HOST === '0.0.0.0') for (const ni of lanAddresses()) console.log('  局域网: http://' + ni.address + ':' + PORT + '   [' + ni.name + ']');
   console.log('引擎模式: ' + ((getLlmConfig().base_url && getLlmConfig().api_key && getLlmConfig().model) ? 'llm' : 'rule（未配置大模型，规则引擎模式）'));
 });
