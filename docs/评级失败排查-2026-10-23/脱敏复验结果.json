@@ -1,0 +1,54 @@
+{
+  "first_round": [
+    {
+      "kind": "责任结论自身",
+      "source_rating_id": "mon_mvjshhho_2499",
+      "status": "completed",
+      "grade": "L2",
+      "attempt_count": 1,
+      "attempt_errors": [],
+      "elapsed_ms": 85479,
+      "total_tokens": 29097
+    },
+    {
+      "kind": "具体帮助证据",
+      "source_rating_id": "mon_mvjshgpj_2493",
+      "status": "completed",
+      "grade": "L2",
+      "attempt_count": 1,
+      "attempt_errors": [],
+      "elapsed_ms": 74701,
+      "total_tokens": 27854
+    },
+    {
+      "kind": "规则引用",
+      "source_rating_id": "mon_mvjshf5b_2481",
+      "status": "failed",
+      "error": "模型评级结果无效：具体帮助证据编号不存在或不是本条有效材料",
+      "attempt_count": 2,
+      "elapsed_ms": 77351
+    },
+    {
+      "kind": "有效 JSON",
+      "source_rating_id": "mon_mvjshhd4_2498",
+      "status": "completed",
+      "grade": "L2",
+      "attempt_count": 1,
+      "attempt_errors": [],
+      "elapsed_ms": 47358,
+      "total_tokens": 22721
+    }
+  ],
+  "after_refining_feedback": [
+    {
+      "kind": "规则引用",
+      "source_rating_id": "mon_mvjshf5b_2481",
+      "status": "completed",
+      "grade": "L2",
+      "attempt_count": 1,
+      "attempt_errors": [],
+      "elapsed_ms": 83304,
+      "total_tokens": 30695
+    }
+  ]
+}
