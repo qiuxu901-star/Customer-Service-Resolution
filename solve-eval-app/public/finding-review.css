@@ -1,0 +1,17 @@
+/* Output location and treatment impact remain visible; full comparisons live in details. */
+.finding-locations{font-size:13px;line-height:1.8;color:#526357;margin:8px 0 12px}
+.finding-locations p{margin:3px 0}.finding-main-location{font-size:13px;font-weight:500;color:#405545;line-height:1.8}
+.finding-location-label{color:#617066}.finding-related-locations{font-size:12px;color:#617066}
+.finding-quote-group{min-width:0;margin-top:16px}.finding-quote-group h5{margin:0 0 6px;font-size:13px;color:#425847}
+.finding-impact{padding:12px 14px;background:#f8f5eb;border-left:3px solid #a79460;font-size:13px;line-height:1.85;white-space:pre-wrap}
+.report-findings-heading,.report-finding-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.report-findings-heading>span,.report-finding-heading>span{font-size:12px;color:#5d6f61;flex-shrink:0}
+.report-finding-heading{justify-content:flex-start}.report-finding-heading h4{margin:0;font-size:15px;line-height:1.75}
+.report-findings .llm-finding{padding:18px 20px;border:1px solid #dce4d8;background:#fff;border-radius:7px;scroll-margin-top:80px}
+.report-findings .llm-finding:focus{outline:2px solid #537d62;outline-offset:3px}
+.report-use-boundary{margin-top:14px;padding:12px 14px;background:#faf5e8;border-left:3px solid #9d8246;color:#655126;line-height:1.8;font-size:13px}
+.report-use-boundary p{margin:5px 0 0!important}.report-location-summary{margin:14px 0 0!important;font-size:12px!important;color:#576b5b}
+.issue-location-table{table-layout:fixed;width:100%;min-width:0}.issue-summary-table.issue-location-table th:nth-child(1){width:20%!important}.issue-summary-table.issue-location-table th:nth-child(2){width:14%}.issue-location-table th:nth-child(3){width:34%}.issue-location-table th:nth-child(4){width:22%}.issue-summary-table.issue-location-table th:nth-child(5){width:10%!important}
+.issue-location-table td{overflow-wrap:anywhere}.issue-location-table .issue-impact-cell p{font-size:13px;line-height:1.85;margin:0}
+.issue-location-table .issue-action-cell .btn{white-space:normal;min-height:44px;padding:8px;font-size:12px}
+@media(max-width:900px){.issue-location-table,.issue-location-table tbody,.issue-location-table tr,.issue-location-table td{display:block;width:auto!important}.issue-location-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}.issue-location-table tr{padding:14px 0;border-bottom:1px solid #dce4d8}.issue-location-table td{border:0;padding:8px 12px}.issue-location-cell::before{content:"主要问题位置：";font-size:12px;color:#617066}.issue-impact-cell::before{content:'对处理的影响';display:block;font-size:12px;color:#5d6f61;margin-bottom:4px}.issue-location-table .issue-record-cell{background:#f6f8f4}.report-findings .llm-finding{padding:14px}}

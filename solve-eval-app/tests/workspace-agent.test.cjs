@@ -82,3 +82,15 @@ test('来源全部校验后才保存，缺陷不存在、跨批和旧评级不�
 test('相同内容重新匹配后可整理与复核，真正改材料后拒绝；后续失败不能复用旧成功',t=>{
  const x=setup(t);skillSeed(x.storage);const old=x.storage.byId('monitor_item_routes','route-a');x.storage.update('monitor_ratings','rating-a',{record_hash:'same',scene_id:'scene-a',monitor_binding:{kind:'basic',definition:{document:'规则'}}});const route=x.storage.insert('monitor_item_routes',{...old,id:'route-again',record_hash:'same',monitor_binding:{definition:{document:'规则'},kind:'basic'}});x.storage.update('monitor_batch_items','a',{current_route_id:route.id});const task=x.agent.createRatingTask('rating-a',skillBody());assert.equal(task.skill_change.source_findings.length,2);assert.equal(x.agent.reviewRating('rating-a',{actor:'测试',decision:'confirm',reason:'原文可核对'}).grade,'L1');x.storage.update('monitor_item_routes',route.id,{record_hash:'changed'});assert.throws(()=>x.agent.createRatingTask('rating-a',{...skillBody(),request_id:'another'}),/匹配版本/);
 });
+
+test('助手按租户精确查询统计和证据，历史范围兼容全部租户且保存查询条件',async t=>{
+ let output,requested='get_workspace_summary';const x=setup(t,{fetchImpl:async(url,options)=>{
+  const input=JSON.parse(options.body);if(input.messages.at(-1).role==='tool'){output=JSON.parse(input.messages.at(-1).content);return response({content:'已按租户查询'});}
+  const reply=tool(requested);if(requested==='read_record_evidence')reply.tool_calls[0].function.arguments=JSON.stringify({record_id:'b'});return response(reply);
+ }});seed(x.storage);
+ for(const id of ['a','b']){const route=x.storage.byId('monitor_item_routes','route-'+id);x.storage.update('monitor_item_routes',route.id,{effective_record:{...route.effective_record,tenant_id:id==='a'?'800029':'8000290'}});}
+ const c=x.agent.create(),context={tenant_id:'800029'};
+ await x.agent.send(c.id,{content:'查看数据',request_id:'tenant-summary',context});assert.equal(output.valid,1);assert.equal(output.counts.U,1);assert.equal(output.counts.L3,0);assert.equal(x.agent.read(c.id).context.tenant_id,'800029');
+ requested='read_record_evidence';await x.agent.send(c.id,{content:'查看记录b',request_id:'tenant-evidence',context});assert.match(output.error,/不在当前范围/);assert.equal(output.report,undefined);
+ requested='get_workspace_summary';await x.agent.send(c.id,{content:'全部数据',request_id:'tenant-all',context:{}});assert.equal(output.valid,2);
+});

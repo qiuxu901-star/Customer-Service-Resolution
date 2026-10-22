@@ -1,8 +1,8 @@
-# Customer Service Resolution · 客服 AI 解决能力价值评估平台
+# Customer Service Resolution · AI客服评测与优化平台
 
-度量「客服-司机会话中，我方 AI 能力实际解决了多少问题」的内部工具：**和评估助手对话获取数据与分析结论 → 输入会话检测 → 信息不足时提问 → 结果落入人工复核平台 → 全盘记录 + 数据看板 → 材料就绪度追踪 → 同口径复验**。
+以评测为核心，发现AI客服的问题、定位原因，并验证改进效果的内部平台：**和评估助手对话获取数据与分析结论 → 输入会话检测 → 信息不足时提问 → 结果落入人工复核平台 → 全盘记录 + 数据看板 → 材料就绪度追踪 → 同口径复验**。
 
-> 内部业务工具，保留所有权利；仅限公司内网使用，未内置登录鉴权，请勿部署到公网。
+> 内部业务工具，保留所有权利。已内置手机号与密码登录及管理员账号管理。
 
 ## 目录结构
 
@@ -32,13 +32,15 @@
 
 ```bash
 cd solve-eval-app
+node manage-accounts.js create-admin  # 首次运行：创建管理员，按提示隐藏输入密码
 node server.js          # Node >= 18，零依赖，无需 npm install
 # 本机打开 http://localhost:8817
 ```
 
-- 默认进入新版 Agent 工作台，支持批量分析、复核、方案维护和模型配置；旧版入口为 `/legacy`
+- 先使用手机号和密码登录，首次登录需修改临时密码；管理员可在侧栏「账号管理」维护成员。详见 [登录与账号管理](solve-eval-app/README.md)
+- 登录后进入新版 Agent 工作台，旧版入口为 `/legacy`，同样需要登录
 - 服务默认绑定 `127.0.0.1`；需要局域网共享时显式设置 `HOST=0.0.0.0` 并配置访问控制（详见 `solve-eval-app/README.md`「局域网共同访问」章节）
-- 数据落在 `solve-eval-app/data/db.json`（已被 .gitignore 排除，不会入库）
+- 业务数据落在 `solve-eval-app/data/db.json`，账号与会话落在同目录 `auth.json`（均不入库）；外置目录统一由 `CSR_DATA_DIR` 指定
 - 切换大模型模式：应用内「设置」页填入 OpenAI 兼容接口
 
 ## 版本迭代管理约定
@@ -51,7 +53,7 @@ node server.js          # Node >= 18，零依赖，无需 npm install
 | CI | push/PR 到 main 自动跑：JS 语法检查 + 服务启动冒烟（bootstrap 与 agent/chat 健康检查） |
 | 发布 | GitHub Release 对应每个 minor/major tag，发布说明摘自 CHANGELOG |
 
-当前版本：**v1.2.0**（2026-10-19 Agent 工作台、批量评级、评估员版本维护和场景方案改进，见 CHANGELOG）。
+当前版本：**v1.8.6**（2026-10-22 登录与账号管理、业务配置、表现评估和 Skill 联合诊断，见 CHANGELOG）。
 
 ## 线上部署（2026-10-14）
 
@@ -72,21 +74,33 @@ node server.js          # Node >= 18，零依赖，无需 npm install
 本地也可从确定的提交构建发布包：
 
 ```bash
-git archive --format=tar.gz --prefix=customer-service-resolution/ --output=/tmp/csr-v1.2.0.tar.gz HEAD solve-eval-app scripts README.md CHANGELOG.md templates
-scp /tmp/csr-v1.2.0.tar.gz root@47.103.25.159:/tmp/
+git archive --format=tar.gz --prefix=customer-service-resolution/ --output=/tmp/csr-v1.8.6.tar.gz HEAD solve-eval-app scripts README.md CHANGELOG.md templates
+scp /tmp/csr-v1.8.6.tar.gz root@47.103.25.159:/tmp/
 ```
 
 在服务器解出该版本自己的部署脚本，再运行：
 
 ```bash
-mkdir -p /tmp/csr-v1.2.0-deploy
-tar -xzf /tmp/csr-v1.2.0.tar.gz -C /tmp/csr-v1.2.0-deploy customer-service-resolution/scripts/deploy.sh
+mkdir -p /tmp/csr-v1.8.6-deploy
+tar -xzf /tmp/csr-v1.8.6.tar.gz -C /tmp/csr-v1.8.6-deploy customer-service-resolution/scripts/deploy.sh
 # 普通升级：保留正在使用的数据目录
-bash /tmp/csr-v1.2.0-deploy/customer-service-resolution/scripts/deploy.sh /tmp/csr-v1.2.0.tar.gz
-# 本次已确认：使用空白数据，不沿用旧方案、记录和模型配置
-RESET_DATA=1 BIND_HOST=0.0.0.0 bash /tmp/csr-v1.2.0-deploy/customer-service-resolution/scripts/deploy.sh /tmp/csr-v1.2.0.tar.gz
+bash /tmp/csr-v1.8.6-deploy/customer-service-resolution/scripts/deploy.sh /tmp/csr-v1.8.6.tar.gz
+# 可选：不沿用旧数据和账号（需要重新初始化管理员）
+RESET_DATA=1 BIND_HOST=0.0.0.0 bash /tmp/csr-v1.8.6-deploy/customer-service-resolution/scripts/deploy.sh /tmp/csr-v1.8.6.tar.gz
 ```
 
 两条部署命令按需要择一执行。`RESET_DATA=1` 为本次版本创建全新数据目录，不会带入开发机数据和密钥；旧目录不再使用，临时保留以便部署失败时恢复。正式服务默认监听 `127.0.0.1:8818`，通过原 nginx 反向代理访问。当前原域名解析未就绪、旧服务可通过 IP 的 8818 端口访问；本次命令显式使用 `BIND_HOST=0.0.0.0` 保持原 IP 入口。部署脚本不会修改其他服务、防火墙或 nginx。模型连接需要上线后重新配置。
 
-预检可使用 `DEPLOY_DRY_RUN=1 APP_DIR=/tmp/csr-check bash .../deploy.sh /tmp/csr-v1.2.0.tar.gz`；只检查发布包，不切换服务或修改运行数据。健康检查失败时脚本恢复原版本链接和 systemd 配置，恢复原来处于运行状态的服务。
+预检可使用 `DEPLOY_DRY_RUN=1 APP_DIR=/tmp/csr-check bash .../deploy.sh /tmp/csr-v1.8.6.tar.gz`；只检查发布包，不切换服务或修改运行数据。健康检查失败时脚本恢复原版本链接和 systemd 配置，恢复原来处于运行状态的服务。
+
+## 配置迁移准备（仅在本机执行）
+
+本次只提交源码，不部署服务器。后续迁移范围为业务场景、客服业务 Skills、评估配置（公共标准、场景监测方案、执行流程及问题分类定义），保留其关联和版本。模型配置、分析记录、诊断历史、旧账号与会话不迁移。
+
+`scripts/prepare-production-data.cjs` 从本地数据库生成独立的私有迁移目录和一个首次登录需改密的默认管理员。它不修改源库，输出目录必须全新。输出文件包含业务配置及账号哈希；明文初始密码单独保存，均不得提交 Git 或附到公开 Release。
+
+```bash
+node scripts/prepare-production-data.cjs /path/to/local/db.json /private/migration/data /private/migration/admin-credentials.json
+```
+
+工具默认管理员登录标识为 `19900000000`，可通过第四个参数指定其他手机号。每次生成独立随机初始密码；密码不硬编码在程序中。配置清单与校验值保存在迁移目录旁的 `migration-manifest.json`，便于上线前逐项核对。

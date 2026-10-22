@@ -40,3 +40,18 @@ test('固定底单复验跨导入版本关联，但普通评级轮次和别的�
   d.runs=[{id:'before',kind:'offline_evidence_audit'},{id:'compare',kind:'uploaded_output_comparison',executed:true,base_run_id:'before',case_id:'case-a',before:{verdict:'conflict'},after:{verdict:'consistent'},case_snapshots:[{id:'case-a',record:d.batch_items[0].record_snapshot}]}];
   const selected=collect(d).unique.filter(r=>r.item.id==='b');assert.equal(comparisons(d,selected).length,1);assert.equal(comparisons(d,selected,{from:'2026-10-05'}).length,0);
 });
+
+test('租户精确筛选覆盖累计去重、原始数量、失败行、趋势及复验，不混入其他租户',()=>{
+ const d=fixture(),a=add(d,'ta','one','same','L0'),b=add(d,'tb','two','same','L3'),c=add(d,'tc','one','same','L2');
+ a.record_snapshot.business_record.fields.tenant_id='800029';b.record_snapshot.business_record.fields.tenant_id='800029';c.record_snapshot.business_record.fields.tenant_id='8000290';
+ d.batch_items.push({id:'bad-a',batch_id:'one',raw_record:{'租户id':'800029'}},{id:'bad-b',batch_id:'one',raw_record:{tenant_id:'8000290'}},{id:'unknown',batch_id:'one'});
+ const selected=collect(d,{tenant:'800029'});
+ assert.equal(collect(d).unique.length,2);assert.equal(selected.unique.length,1);assert.equal(selected.unique[0].item.id,'tb');assert.equal(selected.rawCount,3);assert.equal(selected.rawValid,2);assert.equal(selected.duplicates,1);assert.equal(selected.batchCount,2);assert.deepEqual(selected.rows.map(r=>r.item.id),['tb','bad-a']);assert.equal(metrics(selected.rows).delivery,1);assert.equal(trend(selected.rows)[0].valid,1);
+ d.runs=[a,c].map((item,i)=>({id:'compare-'+i,kind:'uploaded_output_comparison',executed:true,case_id:item.case_id,base_run_id:'before',before:{},after:{}}));
+ assert.deepEqual(comparisons(d,selected.rows).map(r=>r.id),['compare-0']);assert.equal(collect(d,{tenant:'does-not-exist'}).rows.length,0);
+});
+
+test('租户 ID 保留前导零并兼容数字、原始列名和案例快照，未知租户仅在全部中显示',()=>{
+ const B=require('../public/business-import');
+ assert.equal(B.tenantId({business_record:{fields:{tenant_id:' 00800029 '}}}),'00800029');assert.equal(B.matchesTenant({tenant_id:800029},'800029'),true);assert.equal(B.matchesTenant({'租户ID':'00800029'},'800029'),false);assert.equal(B.tenantId({record_snapshot:{business_record:{fields:{tenant_id:'800029'}}}}),'800029');assert.equal(B.matchesTenant({},'800029'),false);assert.equal(B.matchesTenant({},'all'),true);
+});

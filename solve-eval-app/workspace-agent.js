@@ -2,11 +2,12 @@
 const {randomUUID}=require('node:crypto');
 const {hash}=require('./monitoring');
 const {matches}=require('./public/rating-identity');
+const {matchesTenant}=require('./public/business-import');
 const {snapshot}=require('./model-configs');
 const {REPLY_GUIDELINES,replyBlockForTool}=require('./workspace-replies');
 const fail=(message,statusCode=400)=>{throw Object.assign(Error(message),{statusCode});};
 const tools=[
-  ['get_workspace_summary','读取当前对象、场景、批次范围的评级统计。U、待匹配、失败单独计数。'],
+  ['get_workspace_summary','读取当前对象、场景、租户、批次范围的评级统计。U、待匹配、失败单独计数。'],
   ['list_analysis_tasks','查询已有分析任务及导入、匹配、评级进度。'],
   ['list_problem_records','查询当前范围的记录、等级、缺口摘要及编号。'],
   ['read_record_evidence','读取当前范围内指定记录的原文、评级维度及问题引用。先从记录列表取得编号。'],
@@ -29,7 +30,8 @@ function createWorkspaceAgent({storage,modelConfigs,getBatchRoutingReview,fetchI
     if(!['all','frontline','tier2','bot','linked'].includes(scope))fail('评估对象无效');
     if(!['all','unmapped'].includes(scene_id)&&!storage.byId('business_scenes',scene_id))fail('业务场景不存在');
     if(!['all','latest'].includes(batch_id)&&!storage.byId('monitor_batches',batch_id))fail('分析任务不存在');
-    return {scope,scene_id,batch_id};
+    if(input.tenant_id!==undefined&&(typeof input.tenant_id!=='string'||input.tenant_id.length>200))fail('租户 ID 无效');
+    return {scope,scene_id,batch_id,tenant_id:input.tenant_id?.trim()||'all'};
   }
   function rows(context){
     const batches=storage.list('monitor_batches'),batch=context.batch_id==='latest'?batches.at(-1)?.id:context.batch_id;
@@ -39,7 +41,7 @@ function createWorkspaceAgent({storage,modelConfigs,getBatchRoutingReview,fetchI
       const rating=storage.list('monitor_ratings').filter(r=>r.item_id===item.id&&(!route||matches(r,route))).at(-1);
       const status=!item.case_id?'import_failed':route&&route.status!=='ready'?'routing_pending':!rating?'pending':rating.status==='completed'||rating.status==='done'?rating.report?.grade||'failed':['L0','L1','L2','L3','U'].includes(rating.report?.grade)?rating.report.grade:rating.status;
       return {item,record,scene,rating,status};
-    }).filter(r=>(['all','linked'].includes(context.scope)||r.record?.scope===context.scope)&&(context.scene_id==='all'||(context.scene_id==='unmapped'?!r.scene:r.scene===context.scene_id)));
+    }).filter(r=>matchesTenant({...r.item,record_snapshot:r.record},context.tenant_id||'all')&&(['all','linked'].includes(context.scope)||r.record?.scope===context.scope)&&(context.scene_id==='all'||(context.scene_id==='unmapped'?!r.scene:r.scene===context.scene_id)));
     const invalid=items.filter(r=>!r.item.case_id);
     items=[...new Map(items.filter(r=>r.item.case_id).map(r=>[batch==='all'?r.item.logical_key||r.item.case_id:r.item.case_id,r])).values()];
     return [...items,...invalid];

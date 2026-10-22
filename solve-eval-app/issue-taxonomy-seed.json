@@ -1,0 +1,205 @@
+{
+  "schema_version": 1,
+  "proposed_version": "issue-taxonomy/v1",
+  "status": "draft_not_active",
+  "date": "2026-10-20",
+  "purpose": "整理客服AI评估中已发现的问题；不新增业务判据、不改变质量等级",
+  "classification_unit": "一条具体问题发现，一个主类别",
+  "unclassified": {
+    "category_id": null,
+    "not_a_business_category": true,
+    "reasons": [
+      "no_matching_definition",
+      "ambiguous_boundary",
+      "insufficient_context",
+      "compound_finding",
+      "invalid_model_category"
+    ]
+  },
+  "categories": [
+    {
+      "id": "C01",
+      "name": "用户诉求理解或回应不到位",
+      "definition": "用户明确提出、属于本次任务范围且会影响处理结果的主要请求，AI没有回应、只回应一部分或回答偏离请求，也未说明暂时无法处理的原因。",
+      "inclusion_rules": [
+        "未回答撤销、退款、费用处理等明确请求",
+        "多项请求仅回答一部分",
+        "误读用户要求，处理内容偏离请求"
+      ],
+      "exclusion_rules": [
+        "已经回答处理方向，仅缺后续操作细节：C07",
+        "遗漏影响判断的事实或申辩线索，尚非遗漏处理请求：C02"
+      ],
+      "positive_example": {
+        "kind": "paraphrased_from_observed_patterns",
+        "text": "未回应乘客全额退还违约金的诉求，未给出退款处置路径或需人工核验的条件。"
+      },
+      "negative_example": {
+        "kind": "synthetic",
+        "text": "已说明需核实后决定撤销，并给出核实项，不因尚未撤销自动认定诉求遗漏。"
+      },
+      "enabled": true
+    },
+    {
+      "id": "C02",
+      "name": "关键事实或语境未纳入分析",
+      "definition": "本次可见材料中存在会影响判断的事实、当事人陈述或上下文，AI未提取或没有纳入分析。",
+      "inclusion_rules": [
+        "遗漏录音中的关键陈述",
+        "未结合等待共识、道路受阻等已有线索",
+        "单看数值而忽略已提供的关键语境"
+      ],
+      "exclusion_rules": [
+        "材料并未提供，不能据此断言未读取或未执行",
+        "当事人单方说法不能被当作已经核实的客观事实",
+        "已经提取并考虑材料，但推理关系或冲突未分析：C06"
+      ],
+      "positive_example": {
+        "kind": "paraphrased_from_observed_patterns",
+        "text": "AI只引车内录音单句，未用电话录音中司机提议上桥、乘客同意的协商证据，事实链不完整。"
+      },
+      "negative_example": {
+        "kind": "synthetic",
+        "text": "材料未提供录音，不能仅凭缺少录音断言AI当时未调听。"
+      },
+      "enabled": true
+    },
+    {
+      "id": "C03",
+      "name": "事实表述或证据引用不准确",
+      "definition": "AI的事实表述或证据引用与可核对的原始材料不一致，包括引错对象、记录、数量，或引用改变原意。",
+      "inclusion_rules": [
+        "把一项费用描述成多项且可从提供材料核实",
+        "引用不属于本工单或不属于该说话人的材料",
+        "摘录断章取义导致原意改变",
+        "同一输出中的数量、对象等事实措辞与其明确列出的明细不一致；只确认文本一致性，不据此确认底单真值"
+      ],
+      "exclusion_rules": [
+        "只有缺少独立底单，尚不能判断断言真假：C04或待核实",
+        "不能仅以人工意见不同确认事实错误",
+        "没有引入关键材料但未改变原意：C02",
+        "主问题是推理关系或处理分支未说明，而非可直接核对的事实或引用差异：C06"
+      ],
+      "positive_example": {
+        "kind": "paraphrased_from_observed_patterns",
+        "text": "“多项附加费”与实际仅列一项停车费不符，易让处理人误判存在其他费用，影响核查范围。"
+      },
+      "negative_example": {
+        "kind": "synthetic",
+        "text": "没有工具底单时，某个AI自述数值尚未核验，不能直接认定数值是捏造。"
+      },
+      "enabled": true
+    },
+    {
+      "id": "C04",
+      "name": "结论依据或待核实边界不清",
+      "definition": "AI给出责任、金额、处理等结论，但没有交代必要的可核验依据，或未把尚未核实的事项与确定事实区分。",
+      "inclusion_rules": [
+        "未说明关键数值来源及待核实状态",
+        "材料不足以支持确定性结论却未说明边界",
+        "结论未关联足以支持判断的证据"
+      ],
+      "exclusion_rules": [
+        "已能从原文核对出事实或引用错误：C03",
+        "完全没有可评价材料，应按原评估规则处理，不能补造具体缺陷",
+        "明确说明未核实并提出合理核查路径，不因缺底单本身认定问题"
+      ],
+      "positive_example": {
+        "kind": "paraphrased_from_observed_patterns",
+        "text": "以“实际接驾13分钟超预估9分钟”作为主要责任依据，材料仅有播报9分钟预估，13分钟无底单。"
+      },
+      "negative_example": {
+        "kind": "synthetic",
+        "text": "明确写联系情况待核实，并说明需查联系记录，不因为暂缺话单就认定该表述有误。"
+      },
+      "enabled": true
+    },
+    {
+      "id": "C05",
+      "name": "业务规则适用有误",
+      "definition": "有可读取且适用性可核对的业务规则，AI使用了不匹配本工单场景或事实条件的条款，或错误解释条款。",
+      "inclusion_rules": [
+        "把其他业务场景的条款用于当前结论",
+        "漏掉规则明确要求的适用条件",
+        "条款解释与提供的规则原文不一致"
+      ],
+      "exclusion_rules": [
+        "未提供规则原文，不能确认阈值、免责条件或条款使用错误",
+        "缺规则来源而未说明不确定性：C04",
+        "仅缺材料中的特殊场景线索：C02",
+        "不能借分类新增枢纽容差、免责、退款或赔偿政策"
+      ],
+      "positive_example": {
+        "kind": "paraphrased_from_observed_patterns",
+        "text": "将「司乘冲突/敏感冲突」条款用于取消违约金场景，而录音中无任何冲突对话，依据与场景不相容。"
+      },
+      "negative_example": {
+        "kind": "synthetic",
+        "text": "只有司机自述交通管制但没有适用政策，不能直接认定AI违反某条免责规则。"
+      },
+      "enabled": true
+    },
+    {
+      "id": "C06",
+      "name": "分析推理不完整或不一致",
+      "definition": "AI只给结论而缺少必要的分析推导，或已提取相关事实和条件却未解释它们如何影响结果，未处理关键冲突，或结论推导与前提不一致。",
+      "inclusion_rules": [
+        "可见输出只有结论，缺少支持结论的必要分析过程或分支解释",
+        "事实只罗列，未说明对判断的作用",
+        "已提取相互冲突的信息但未解释如何处理",
+        "结论推导不成立或前后逻辑矛盾"
+      ],
+      "exclusion_rules": [
+        "相关事实或线索根本未纳入分析：C02",
+        "规则适用已可确认错误：C05",
+        "仅结论缺来源、不知推导前提是否成立：C04",
+        "数量措辞与所列明细等可直接核对的事实表述不一致：C03"
+      ],
+      "positive_example": {
+        "kind": "paraphrased_from_observed_patterns",
+        "text": "关键信息记录“乘客同意”取消，结论仍定司机无故取消有责，未作任何衔接分析"
+      },
+      "negative_example": {
+        "kind": "synthetic",
+        "text": "可见分析已覆盖冲突及分支，仅缺最终操作步骤，应看C07。"
+      },
+      "enabled": true
+    },
+    {
+      "id": "C07",
+      "name": "处理建议或交付不完整",
+      "definition": "AI已回应主要处理方向，但缺少完成当前任务所必要的核实清单、后续步骤、处理条件或可执行交付。",
+      "inclusion_rules": [
+        "只有笼统的继续核实，没有明确核实什么",
+        "未说明需补哪些材料以及核实后的处理分支",
+        "缺少在任务要求范围内必要的后续操作或答复内容"
+      ],
+      "exclusion_rules": [
+        "完全未回应用户主要处理请求：C01",
+        "不能因本次没有提供事中工具/引导记录就断言从未执行",
+        "不能要求超出评估任务范围或超出已确认权限的操作"
+      ],
+      "positive_example": {
+        "kind": "paraphrased_from_observed_patterns",
+        "text": "仅称无法判定，未提示核实轨迹飘点或补路里程，无可执行核查建议。"
+      },
+      "negative_example": {
+        "kind": "synthetic",
+        "text": "用户请求仅为判断争议点，AI已完整交付该任务，不能因为没有执行退款就认定交付不足。"
+      },
+      "enabled": true
+    }
+  ],
+  "change_policy": {
+    "stable_ids": true,
+    "human_publish_required": true,
+    "existing_grades_unchanged": true,
+    "history_reclassification": "explicit_scope_preview_and_append_only"
+  },
+  "calibration": {
+    "date": "2026-10-21",
+    "source": "吴新1020002当前83条实际问题发现、建议与冻结引用，逐条核对；完整映射另存审计文档",
+    "classified": 80,
+    "unclassified_for_review": 3
+  }
+}

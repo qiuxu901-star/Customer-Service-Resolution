@@ -1,21 +1,28 @@
 'use strict';
-Object.assign(names,{home:'能力成长',batches:'分析任务',records:'记录与复核',analytics:'数据分析'});
+Object.assign(names,{home:'评测与优化',batches:'分析任务',records:'记录与复核',analytics:'数据分析'});
 let workspaceConversation=null,workspaceConversations=[],workspaceChatBusy=false,workspaceChatError='',workspaceDraft='',workspaceModel='',workspaceChatLoaded=false;
 let workspaceRecordsBatch='all';
-let workspaceContext={scope:'all',scene_id:'all',batch_id:'all'},analysisTaskId=null,workspaceRecordQuery='',workspaceRecordStatus='all',workspaceRecordPage=1;
+let workspaceContext={scope:'all',scene_id:'all',batch_id:'all',tenant_id:'all'},analysisTaskId=null,workspaceRecordQuery='',workspaceRecordStatus='all',workspaceRecordPage=1;
 const statusNames={pending:'待评',running:'评级中',failed:'评级失败',routing_pending:'待确认匹配',import_failed:'导入失败',not_applicable:'方案不适用',...gradeLabels};
 const wsButton=(label,attr,primary=false)=>'<button class="btn '+(primary?'primary':'')+'" '+attr+'>'+label+'</button>';
-function workspaceRows({batch=batchId,target=scope,scene=sceneFilter,run='latest'}={}){
+function workspaceRows({batch=batchId,target=scope,scene=sceneFilter,tenant='all',run='latest'}={}){
   const resolved=batch==='latest'?sortedBatches()[0]?.id:batch;
-  let items=(data.batch_items||[]).filter(i=>batch==='all'||i.batch_id===resolved).map(effectiveItem);
+  let items=(data.batch_items||[]).filter(i=>batch==='all'||i.batch_id===resolved).map(effectiveItem).filter(i=>BusinessImport.matchesTenant(i,tenant));
   const invalid=items.filter(i=>!i.case_id&&scene==='all'&&target==='all');
   items=items.filter(i=>i.case_id&&(['all','linked'].includes(target)||i.record_snapshot?.scope===target));
   items=[...new Map(items.map(i=>[batch==='all'?i.logical_key||i.case_id:i.case_id,i])).values()].filter(i=>{const id=sceneOf(i.record_snapshot,i.case_id);return scene==='all'||(scene==='unmapped'?!id:id===scene);});
-  return [...items.map(item=>{const routing=itemRoute(item);let ratings=(data.ratings||[]).filter(r=>r.item_id===item.id);ratings=run==='latest'?ratings.filter(r=>!routing||RatingIdentity.matches(r,routing)):ratings.filter(r=>r.run_id===run);const rating=ratings.at(-1);return {item,routing,rating,status:routing&&routing.status!=='ready'?'routing_pending':ratingState(rating)};}),...invalid.map(item=>({item,status:'import_failed'}))];
+  return [...items.map(item=>{const routing=itemRoute(item);let ratings=(data.ratings||[]).filter(r=>r.item_id===item.id);ratings=run==='latest'?ratings.filter(r=>!routing||RatingIdentity.matches(r,routing)):ratings.filter(r=>r.run_id===run);const rating=ratings.at(-1);return {item,routing,rating,...(data.issue_taxonomy?{classifications:(data.issue_classifications||[]).filter(x=>x.rating_id===rating?.id)}:{}),status:routing&&routing.status!=='ready'?'routing_pending':ratingState(rating)};}),...invalid.map(item=>({item,status:'import_failed'}))];
+}
+function workspaceTenantOptions(selected='all',batch='all'){
+  const items=(data.batch_items||[]).filter(i=>batch==='all'||i.batch_id===batch);
+  const values=new Set(items.map(BusinessImport.tenantId).filter(Boolean));
+  if(batch==='all')for(const record of [...(data.cases||[]),...(data.examples||[])]){const id=BusinessImport.tenantId(record);if(id)values.add(id);}
+  if(selected!=='all'&&selected)values.add(selected);
+  return '<option value="all" '+(selected==='all'?'selected':'')+'>全部租户</option>'+[...values].sort((a,b)=>a.localeCompare(b)).map(id=>'<option value="'+esc(id)+'" '+(selected===id?'selected':'')+'>'+esc(id)+'</option>').join('');
 }
 function workspaceStats(rows){const counts=Object.fromEntries([...gradeOrder,'pending','running','failed','routing_pending','import_failed','not_applicable'].map(s=>[s,rows.filter(r=>r.status===s).length]));const valid=rows.filter(r=>r.item.case_id).length,done=gradeOrder.reduce((n,g)=>n+counts[g],0);return {counts,valid,done,evaluable:done-counts.U};}
 function workspaceSceneFilter(){return '<div class="scene-filter workspace-filter"><label>业务场景<select id="sceneFilter" class="select-inline">'+sceneOptions(sceneFilter)+'</select></label><span class="sub">当前对象：'+esc(targetNames[scope])+'</span></div>';}
-function workspaceContextControls(){return '<div class="agent-context"><label>评估对象<select id="workspaceScope">'+['all','frontline','tier2','linked'].map(s=>'<option value="'+s+'" '+(workspaceContext.scope===s?'selected':'')+'>'+targetNames[s]+'</option>').join('')+'</select></label><label>业务场景<select id="workspaceScene">'+sceneOptions(workspaceContext.scene_id)+'</select></label><label>关联任务<select id="workspaceBatch"><option value="all">全部任务</option>'+sortedBatches().map(b=>'<option value="'+b.id+'" '+(workspaceContext.batch_id===b.id?'selected':'')+'>'+esc(b.name)+'</option>').join('')+'</select></label></div>';}
+function workspaceContextControls(){return '<div class="agent-context"><label>评估对象<select id="workspaceScope">'+['all','frontline','tier2','linked'].map(s=>'<option value="'+s+'" '+(workspaceContext.scope===s?'selected':'')+'>'+targetNames[s]+'</option>').join('')+'</select></label><label>业务场景<select id="workspaceScene">'+sceneOptions(workspaceContext.scene_id)+'</select></label><label>租户 ID<select id="workspaceTenant">'+workspaceTenantOptions(workspaceContext.tenant_id||'all')+'</select></label><label>关联任务<select id="workspaceBatch"><option value="all">全部任务</option>'+sortedBatches().map(b=>'<option value="'+b.id+'" '+(workspaceContext.batch_id===b.id?'selected':'')+'>'+esc(b.name)+'</option>').join('')+'</select></label></div>';}
 function workspaceActionHtml(action){return wsButton(esc(action.label),'data-workspace-action="'+esc(action.type)+'" '+(action.id?'data-action-id="'+esc(action.id)+'"':'')+(action.context?' data-action-context="'+esc(JSON.stringify(action.context))+'"':''));}
 function workspaceTaskCard(batchId){const b=data.batches.find(b=>b.id===batchId);if(!b)return '';const review=batchRoutingReview(b),run=data.rating_runs.filter(r=>r.batch_id===b.id).at(-1);return '<div class="agent-task-card"><div><span class="badge">批量分析</span><strong>'+esc(b.name)+'</strong><p>'+esc(b.source_name)+' · '+b.imported_count+' 条有效记录</p><p>'+(run?'评级'+esc({running:'中',completed:'已完成',completed_with_errors:'部分失败',interrupted:'中断'}[run.status]||'已有结果'):review?.confirmed?'方案已确认，可以开始评级':'待核对场景与监测方案')+'</p></div>'+wsButton('查看并继续 →','data-workspace-batch="'+esc(b.id)+'"',true)+'</div>';}
 function workspaceMessageHtml(m){
@@ -23,19 +30,19 @@ function workspaceMessageHtml(m){
   const parts=user?{html:'',covered:new Set()}:WorkspaceReply.presentation(m.presentation,{
     action:workspaceActionHtml,
     time:formatTime,
-    scopeLabel:context=>[targetNames[context.scope]||'全部对象',context.scene_id==='all'?'全部场景':context.scene_id==='unmapped'?'未映射场景':data.scenes.find(s=>s.id===context.scene_id)?.name||'所选场景',context.batch_id==='all'?'全部任务':context.batch_id==='latest'?'最近任务':data.batches.find(b=>b.id===context.batch_id)?.name||'所选任务'].join(' · '),
+    scopeLabel:context=>[(context.tenant_id&&context.tenant_id!=='all'?'租户 '+context.tenant_id:'全部租户'),targetNames[context.scope]||'全部对象',context.scene_id==='all'?'全部场景':context.scene_id==='unmapped'?'未映射场景':data.scenes.find(s=>s.id===context.scene_id)?.name||'所选场景',context.batch_id==='all'?'全部任务':context.batch_id==='latest'?'最近任务':data.batches.find(b=>b.id===context.batch_id)?.name||'所选任务'].join(' · '),
   });
   const actions=(m.actions||[]).filter(a=>!parts.covered.has(a.type+':'+(a.id||'')));
-  return '<article class="agent-message '+(user?'from-user':'from-agent')+'"><div class="message-avatar" aria-hidden="true">'+(user?'我':'✦')+'</div><div class="message-body"><div class="message-label">'+(user?'你':'能力成长助手')+(m.model_snapshot?' <span>'+esc(m.model_snapshot.model)+'</span>':'')+'</div>'+(user?'<div class="message-text">'+esc(m.content)+'</div>':WorkspaceReply.body(m.content,parts.html))+(m.batch_id?workspaceTaskCard(m.batch_id):'')+(actions.length&&!m.batch_id?'<div class="actions message-actions" aria-label="相关操作">'+actions.map(workspaceActionHtml).join('')+'</div>':'')+(m.status==='failed'?'<div class="message-error">'+esc(m.error||'消息发送失败')+' '+wsButton('重新发送','data-retry-message="'+esc(m.id)+'"')+'</div>':'')+'</div></article>';
+  return '<article class="agent-message '+(user?'from-user':'from-agent')+'"><div class="message-avatar" aria-hidden="true">'+(user?'我':'✦')+'</div><div class="message-body"><div class="message-label">'+(user?'你':'评测优化助手')+(m.model_snapshot?' <span>'+esc(m.model_snapshot.model)+'</span>':'')+'</div>'+(user?'<div class="message-text">'+esc(m.content)+'</div>':WorkspaceReply.body(m.content,parts.html))+(m.batch_id?workspaceTaskCard(m.batch_id):'')+(actions.length&&!m.batch_id?'<div class="actions message-actions" aria-label="相关操作">'+actions.map(workspaceActionHtml).join('')+'</div>':'')+(m.status==='failed'?'<div class="message-error">'+esc(m.error||'消息发送失败')+' '+wsButton('重新发送','data-retry-message="'+esc(m.id)+'"')+'</div>':'')+'</div></article>';
 }
 function renderAgentWorkspace(){
   const messages=workspaceConversation?.messages||[],config=data.model_config||{},def=config.default_model;
-  return heading('','能力成长助手','围绕业务需求与实际案例，发现能力缺口，明确改进方向。',wsButton('新对话','data-new-conversation '+(workspaceChatBusy?'disabled':''))+wsButton('历史对话','data-history-toggle aria-haspopup="dialog"'))+
+  return heading('','评测优化助手','通过对话发起评测、分析问题、制定优化建议，并验证改进效果。',wsButton('新对话','data-new-conversation '+(workspaceChatBusy?'disabled':''))+wsButton('历史对话','data-history-toggle aria-haspopup="dialog"'))+
     '<div class="agent-workspace"><section class="agent-main">'+workspaceContextControls()+
-    '<div class="agent-thread" id="agentThread" aria-live="polite">'+(!messages.length?'<div class="agent-welcome"><span class="agent-emblem">✦</span><h2>今天，想完善哪项客服能力？</h2><p>梳理新场景需求，或从已有记录中发现改进机会。</p></div>':'')+
+    '<div class="agent-thread" id="agentThread" aria-live="polite">'+(!messages.length?'<div class="agent-welcome"><span class="agent-emblem">✦</span><h2>今天，想从哪里开始评测与优化？</h2><p>发起会话评测，或从已有结果中分析问题、寻找优化方向。</p></div>':'')+
     '<div class="agent-quick-grid '+(messages.length?'compact':'')+'">'+[
       ['batch','▤','批量分析','上传文件，匹配场景与监测方案'],['summary','◫','分析已有数据','看结果、找共性问题与改进方向'],['query','⌕','查询任务进展','查看分析进度与改进待办'],
-    ].map(([key,icon,title,sub])=>'<button class="agent-quick" data-agent-quick="'+key+'"><span class="quick-symbol">'+icon+'</span><div><strong>'+title+'</strong><p>'+sub+'</p></div><span class="quick-arrow">↗</span></button>').join('')+'</div>'+messages.map(workspaceMessageHtml).join('')+(workspaceChatBusy?'<article class="agent-message from-agent"><div class="message-avatar">✦</div><div class="message-body"><div class="message-label">能力成长助手</div><div class="thinking" role="status">正在思考并查阅相关信息<span>…</span></div></div></article>':'')+'</div>'+
+    ].map(([key,icon,title,sub])=>'<button class="agent-quick" data-agent-quick="'+key+'"><span class="quick-symbol">'+icon+'</span><div><strong>'+title+'</strong><p>'+sub+'</p></div><span class="quick-arrow">↗</span></button>').join('')+'</div>'+messages.map(workspaceMessageHtml).join('')+(workspaceChatBusy?'<article class="agent-message from-agent"><div class="message-avatar">✦</div><div class="message-body"><div class="message-label">评测优化助手</div><div class="thinking" role="status">正在思考并查阅相关信息<span>…</span></div></div></article>':'')+'</div>'+
     '<div class="agent-compose-wrap">'+(workspaceChatError?'<div class="agent-error" role="alert">'+esc(workspaceChatError)+'</div>':'')+'<form id="workspaceChatForm" class="agent-composer"><label for="workspaceChatInput" class="sr-only">与助手沟通</label><textarea id="workspaceChatInput" placeholder="描述你的需求，或继续追问当前任务…" maxlength="12000" '+(workspaceChatBusy?'disabled':'')+'>'+esc(workspaceDraft)+'</textarea><div class="composer-tools"><label class="composer-model"><span>模型</span><select id="workspaceModel" aria-label="助手使用模型" '+(workspaceChatBusy?'disabled':'')+'><option value="">'+esc(def?'默认 · '+def.model:'选择模型')+'</option>'+modelOptions(workspaceModel?JSON.parse(workspaceModel):null)+'</select></label><div><span class="composer-shortcut">Enter 发送 · Shift + Enter 换行</span><button class="btn primary" type="submit" '+(workspaceChatBusy?'disabled':'')+'>'+(workspaceChatBusy?'回复中…':'发送 ↑')+'</button></div></div></form><p class="agent-footnote">对话结合当前所选范围回答；导入、方案确认和评级在任务流程中执行。'+(!config.configured?' <button class="link" data-view="models">配置模型服务 ↗</button>':'')+'</p></div></section></div>';
 }
 async function loadWorkspaceConversations(){if(workspaceChatLoaded)return;workspaceChatLoaded=true;try{const result=await request('GET','/api/monitor/conversations');workspaceConversations=result.conversations||[];let id;try{id=localStorage.getItem('csr-workspace-conversation');}catch{}if(id&&workspaceConversations.some(c=>c.id===id)){workspaceConversation=(await request('GET','/api/monitor/conversations/'+id)).conversation;workspaceContext=workspaceConversation.context;}workspaceChatLoaded=true;if(view==='home')render();}catch(e){workspaceChatError=e.message;if(view==='home')render();}}
@@ -78,10 +85,10 @@ function renderWorkspaceAnalytics(){
 render=function(){
   document.querySelectorAll('[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===view);if(b.dataset.view===view)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
   document.querySelectorAll('[data-scope]').forEach(b=>b.classList.toggle('active',b.dataset.scope===scope));
-  document.querySelector('.scope').hidden=['home','batches','models','evaluator','flow'].includes(view);document.querySelector('[data-scope="all"]').hidden=['plans','services'].includes(view);
-  document.body.classList.toggle('agent-page',view==='home');$('crumb').textContent=names[view]||'工作空间';
+  document.querySelector('.scope').hidden=['home','batches','models','evaluator','flow','services','scenes'].includes(view);document.querySelector('[data-scope="all"]').hidden=view==='plans';
+  document.body.classList.toggle('agent-page',view==='home');document.body.classList.toggle('scene-catalog-page',view==='scenes');$('crumb').textContent=names[view]||'工作空间';
   const pages={home:renderAgentWorkspace,batches:renderAnalysisTasks,records:renderWorkspaceRecords,analytics:renderWorkspaceAnalytics,plans:renderPlans,cases:renderCases,runs:renderRuns,services:renderServices,tasks:renderTasks,scenes:renderScenes,flow:renderFlow,models:renderModels,evaluator:renderEvaluatorSkill};
-  $('view').innerHTML=(pages[view]||renderAgentWorkspace)();if(!['home','batches','models','evaluator','flow','scenes'].includes(view))document.querySelector('#view .heading')?.insertAdjacentHTML('afterend',workspaceSceneFilter());
+  $('view').innerHTML=(pages[view]||renderAgentWorkspace)();if(!['home','batches','models','evaluator','flow','scenes','analytics','services'].includes(view))document.querySelector('#view .heading')?.insertAdjacentHTML('afterend',workspaceSceneFilter());
   if(routingReturnBatch&&['plans','scenes'].includes(view))$('view').insertAdjacentHTML('afterbegin','<div class="notice routing-return">正在补充任务的场景与方案。<button class="link" data-return-routing>返回本批并重新匹配 ↗</button></div>');
   clearTimeout(ratingPollTimer);if((data.rating_runs||[]).some(r=>r.status==='running'))ratingPollTimer=setTimeout(pollLlmRating,1500);
   if(view==='home'&&!workspaceChatLoaded)loadWorkspaceConversations();
@@ -104,6 +111,7 @@ document.addEventListener('keydown',e=>{if(e.target.id==='workspaceChatInput'&&e
 document.addEventListener('change',e=>{
   const id=e.target.id;
   if(id==='workspaceModel')workspaceModel=e.target.value;
+  if(id==='workspaceTenant')workspaceContext.tenant_id=e.target.value;
   if(id==='workspaceScope')workspaceContext.scope=e.target.value;
   if(id==='workspaceScene')workspaceContext.scene_id=e.target.value;
   if(id==='workspaceBatch')workspaceContext.batch_id=e.target.value;
@@ -118,21 +126,21 @@ document.addEventListener('click',e=>{
   if(d.analyzeBatch){batchId=d.analyzeBatch;scope='all';sceneFilter='all';show('analytics');}
   if(d.workspaceEvidence)openWorkspaceEvidence(d.workspaceEvidence);
   if(d.workspaceReview)workspaceReviewEditor(d.workspaceReview);
-  if(d.discussEvidence){hideModal();const item=data.batch_items.find(i=>i.id===d.discussEvidence);discussWorkspace({scope:'all',scene_id:'all',batch_id:item.batch_id},'请查询并读取记录 '+item.id+' 的原文与评级依据，解释其判断及下一步建议。');}
+  if(d.discussEvidence){hideModal();const item=data.batch_items.find(i=>i.id===d.discussEvidence);discussWorkspace({scope:'all',scene_id:'all',batch_id:item.batch_id,tenant_id:BusinessImport.tenantId(item)||'all'},'请查询并读取记录 '+item.id+' 的原文与评级依据，解释其判断及下一步建议。');}
   if(d.importError){const item=data.batch_items.find(i=>i.id===d.importError);modal('<h2 id="modalTitle">导入第'+item.row_number+'行 · 失败原因</h2><p class="notice red">'+esc(item.error)+'</p><p>请修正源文件后重新导入。原失败行将保留。</p>');}
   if(b.hasAttribute('data-all-records')){workspaceRecordsBatch='all';workspaceRecordPage=1;render();}
   if(b.hasAttribute('data-clear-records')){workspaceRecordStatus='all';workspaceRecordQuery='';workspaceRecordPage=1;render();}
   if(d.recordPage){workspaceRecordPage=Number(d.recordPage);render();}
   if(d.analyticsRecords){workspaceRecordsBatch=batchId;workspaceRecordStatus=d.analyticsRecords;workspaceRecordPage=1;workspaceRecordQuery='';show('records');}
   if(d.dataScene){workspaceRecordsBatch=batchId;sceneFilter=d.dataScene;workspaceRecordStatus='all';workspaceRecordPage=1;show('records');}
-  if(b.hasAttribute('data-discuss-analytics'))discussWorkspace({scope,scene_id:sceneFilter,batch_id:batchId},'请分析当前范围的能力表现，说明主要问题和优先处理建议，并提供支撑记录。');
-  if(b.hasAttribute('data-discuss-records'))discussWorkspace({scope,scene_id:sceneFilter,batch_id:'all'},'请查看当前范围的问题记录，说明需要优先复核哪些记录及原因。');
-  if(d.discussBatch)discussWorkspace({scope:'all',scene_id:'all',batch_id:d.discussBatch},'请查看这批任务的执行情况和结果，说明下一步如何推进。');
+  if(b.hasAttribute('data-discuss-analytics'))discussWorkspace({scope,scene_id:sceneFilter,batch_id:analyticsBatch,tenant_id:analyticsTenant},'请分析当前范围的能力表现，说明主要问题和优先处理建议，并提供支撑记录。');
+  if(b.hasAttribute('data-discuss-records'))discussWorkspace({scope,scene_id:sceneFilter,batch_id:workspaceRecordsBatch,tenant_id:tenantFilter},'请查看当前范围的问题记录，说明需要优先复核哪些记录及原因。');
+  if(d.discussBatch)discussWorkspace({scope:'all',scene_id:'all',batch_id:d.discussBatch,tenant_id:'all'},'请查看这批任务的执行情况和结果，说明下一步如何推进。');
   if(b.hasAttribute('data-new-conversation')&&!workspaceChatBusy){workspaceConversation=null;workspaceChatError='';workspaceDraft='';try{localStorage.removeItem('csr-workspace-conversation');}catch{}render();}
   if(d.conversation&&!workspaceChatBusy)action(async()=>{workspaceConversation=(await request('GET','/api/monitor/conversations/'+d.conversation)).conversation;workspaceContext=workspaceConversation.context;workspaceChatError='';workspaceDraft='';try{localStorage.setItem('csr-workspace-conversation',workspaceConversation.id);}catch{}hideModal();render();$('workspaceChatInput')?.focus({preventScroll:true});scrollAgentThread();});
   if(d.retryMessage){const m=workspaceConversation?.messages.find(m=>m.id===d.retryMessage);if(m)sendWorkspaceMessage(m.content);}
   if(d.agentQuick==='batch'&&!workspaceChatBusy)action(async()=>{await ensureWorkspaceConversation();importBatchEditor();});
   if(d.agentQuick==='summary')sendWorkspaceMessage('请读取当前范围的评级数据，总结能力表现、主要问题和下一步建议。');
   if(d.agentQuick==='query')sendWorkspaceMessage('请查询当前范围的分析任务进度和改进待办，说明还需要推进哪些工作。');
-  if(d.workspaceAction){const actionContext=d.actionContext?JSON.parse(d.actionContext):workspaceContext;if(d.workspaceAction==='import')importBatchEditor();if(d.workspaceAction==='batch')openWorkspaceBatch(d.actionId);if(d.workspaceAction==='record')openWorkspaceEvidence(d.actionId);if(d.workspaceAction==='analytics'){scope=actionContext.scope;sceneFilter=actionContext.scene_id;batchId=actionContext.batch_id;show('analytics');}if(d.workspaceAction==='tasks'){scope=actionContext.scope;sceneFilter=actionContext.scene_id;show('tasks');}}
+  if(d.workspaceAction){const actionContext=d.actionContext?JSON.parse(d.actionContext):workspaceContext;if(d.workspaceAction==='import')importBatchEditor();if(d.workspaceAction==='batch')openWorkspaceBatch(d.actionId);if(d.workspaceAction==='record')openWorkspaceEvidence(d.actionId);if(d.workspaceAction==='analytics'){scope=actionContext.scope;sceneFilter=actionContext.scene_id;batchId=actionContext.batch_id;show('analytics');}if(d.workspaceAction==='tasks'){tenantFilter=actionContext.tenant_id||'all';scope=actionContext.scope;sceneFilter=actionContext.scene_id;show('tasks');}}
 });

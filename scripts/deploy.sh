@@ -82,8 +82,17 @@ else
   mkdir -p "$DATA_DIR"
   if [ -z "$PREVIOUS" ] && [ -f "$LEGACY_DATA/db.json" ]; then
     if [ -f "$DATA_DIR/db.json" ] && ! cmp -s "$LEGACY_DATA/db.json" "$DATA_DIR/db.json"; then echo '新旧数据目录均有不同数据，迁移中止' >&2; false; fi
+    if [ -f "$LEGACY_DATA/auth.json" ]; then
+      cp -p "$LEGACY_DATA/auth.json" "$BACKUP/legacy-auth.json"
+      if [ -f "$DATA_DIR/auth.json" ] && ! cmp -s "$LEGACY_DATA/auth.json" "$DATA_DIR/auth.json"; then echo '新旧账号数据不同，迁移中止' >&2; false; fi
+      if [ ! -f "$DATA_DIR/auth.json" ]; then cp -p "$LEGACY_DATA/auth.json" "$DATA_DIR/auth.json"; fi
+    fi
     cp -p "$LEGACY_DATA/db.json" "$BACKUP/legacy-db.json"
     if [ ! -f "$DATA_DIR/db.json" ]; then cp -p "$LEGACY_DATA/db.json" "$DATA_DIR/db.json"; fi
+  fi
+  if [ -f "$DATA_DIR/auth.json" ]; then
+    "$NODE_BIN" -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$DATA_DIR/auth.json"
+    cp -p "$DATA_DIR/auth.json" "$BACKUP/auth.json"
   fi
   if [ -f "$DATA_DIR/db.json" ]; then
     "$NODE_BIN" -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$DATA_DIR/db.json"
@@ -117,7 +126,7 @@ systemctl daemon-reload
 systemctl enable "$SERVICE"
 systemctl restart "$SERVICE"
 for attempt in 1 2 3 4 5; do
-  if curl --max-time 5 -sf "http://127.0.0.1:$PORT/api/monitor" >/dev/null; then
+  if curl --max-time 5 -sf "http://127.0.0.1:$PORT/api/health" >/dev/null; then
     trap - ERR
     log "新版本健康检查通过；代码：${RELEASE}；数据：${DATA_DIR}"
     exit 0

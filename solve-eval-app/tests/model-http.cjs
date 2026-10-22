@@ -1,7 +1,7 @@
 'use strict';
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),http=require('node:http'),net=require('node:net'),assert=require('node:assert/strict'),{spawn}=require('node:child_process'),{once}=require('node:events');
 (async()=>{
-  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'csr-model-http-')),calls=[];let child;
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'csr-model-http-')),calls=[];const fetch=require('./helpers-auth.cjs').authenticatedFetch(dir);let child;
   const mock=http.createServer(async(req,res)=>{let text='';for await(const chunk of req)text+=chunk;const body=text?JSON.parse(text):null;calls.push({url:req.url,body,key:req.headers.authorization});res.setHeader('Content-Type','application/json');if(req.url==='/v1/models')return res.end(JSON.stringify({data:[{id:'alpha'},{id:'beta'}]}));if(body.model==='broken'){res.writeHead(401);return res.end(JSON.stringify({error:'do not expose upstream error or secret'}));}res.end(JSON.stringify({choices:[{message:{content:body.messages[0].content==='Reply with OK.'?'OK':JSON.stringify({questions:[],checks:[{description:'合成检查建议'}],assumptions:[]})}}]}));});
   try{
     await new Promise(r=>mock.listen(0,'127.0.0.1',r));

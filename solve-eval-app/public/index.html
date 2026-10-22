@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>客服 AI 解决能力价值评估</title>
 <link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/auth-widget.css">
 </head>
 <body>
 <div class="app">
@@ -28,7 +29,7 @@
       <button class="nav-item" data-view="settings"><span class="nav-idx">09</span>设置</button>
       <button class="nav-item" data-view="agent-config"><span class="nav-idx">10</span>助手配置</button>
     </nav>
-    <div class="sidebar-foot">
+    <div class="sidebar-foot"><div id="authIdentity" class="auth-identity"></div>
       <div class="engine-chip" id="engineChip">引擎：规则模式</div>
       <div class="operator-chip" id="operatorChip">操作人：未设置</div>
     </div>
@@ -287,6 +288,7 @@
   <div class="modal" id="modalBox"></div>
 </div>
 <div class="toast" id="toast"></div>
+<script src="/auth-client.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

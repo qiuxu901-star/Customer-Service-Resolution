@@ -1,0 +1,11 @@
+.is-local-loading{position:relative;min-width:var(--loading-button-width,0);cursor:wait!important;opacity:.8}
+button.is-local-loading{font-size:0!important;gap:8px}
+button.is-local-loading>*{display:none!important}
+button.is-local-loading::before,.local-loading-spinner{content:'';display:inline-block;box-sizing:border-box;width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;flex:none;animation:local-loading-spin .75s linear infinite}
+button.is-local-loading::after{content:attr(data-loading-label);font-size:13px;line-height:1.4}
+.local-loading-status{display:flex;align-items:center;gap:9px;flex:none;margin:12px 0;padding:10px 13px;border:1px solid #dce7e0;border-radius:7px;background:#f3f7f4;color:#315e4d;font-size:13px;line-height:1.6}
+.evidence-drawer #modalBody>.local-loading-status{margin:10px 22px}
+.batch-workspace>.local-loading-status{margin:8px 0}
+.local-loading-status+.form-actions{margin-top:0}
+@keyframes local-loading-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){button.is-local-loading::before,.local-loading-spinner{animation:none;border-right-color:currentColor;opacity:.65}}

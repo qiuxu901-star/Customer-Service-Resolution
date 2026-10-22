@@ -43,16 +43,16 @@ function gradeRecord(record,assessment){
   return result;
 }
 const RATING_HASH=hash({version:RATING_VERSION,algorithm:gradeRecord.toString(),fact:auditContact.toString(),business_input:auditRecord.toString(),extract:extractContactClaim.toString()});
-function createBatchRating({storage,monitor,scenes,clock,getLlmConfig,callModel,evaluatorSkill,onCompleted}){
+function createBatchRating({storage,monitor,scenes,clock,getLlmConfig,callModel,evaluatorSkill,onCompleted,limiter}){
   evaluatorSkill=evaluatorSkill||require('./evaluator-skill').createEvaluatorSkill({storage});
   const get=(c,id)=>storage.byId(c,id)||fail('记录不存在',404);
-  const ingestion=scenes?require('./ingestion').createIngestion({storage,monitor,scenes,clock}):null;
+  const ingestion=scenes?require('./ingestion').createIngestion({storage,monitor,scenes,evaluatorSkill,clock}):null;
   function migrateLegacy(){
     const assigned=new Set(storage.list('monitor_batch_items').map(i=>i.case_id));const orphan=storage.list('monitor_cases').filter(c=>!assigned.has(c.id));if(!orphan.length)return;
     storage.transaction(()=>{let batch=storage.find('monitor_batches',b=>b.source_kind==='legacy_unknown');if(!batch)batch=storage.insert('monitor_batches',{name:'历史材料 · 原批次未知',source_kind:'legacy_unknown',source_name:'旧版材料迁移',source_system:'legacy',actor:'系统兼容迁移',status:'imported',schema_version:1,imported_count:0,duplicate_count:0,updated_count:0,error_count:0,origin_time_known:false});for(const c of orphan)storage.insert('monitor_batch_items',{batch_id:batch.id,case_id:c.id,record_snapshot:clone(c.record),record_hash:c.content_hash,source_record_id:c.source_record_id||null,logical_key:'legacy:'+c.id,ingestion_status:'legacy',assessment:null});storage.update('monitor_batches',batch.id,{imported_count:storage.list('monitor_batch_items').filter(i=>i.batch_id===batch.id).length});});
   }
   migrateLegacy();
-  const llm=getLlmConfig?require('./llm-rating').createLlmRating({storage,assertConfirmed:id=>ingestion.assertConfirmed(id),getLlmConfig,callModel,clock,evaluatorSkill,onCompleted}):null;
+  const llm=getLlmConfig?require('./llm-rating').createLlmRating({storage,assertConfirmed:id=>ingestion.assertConfirmed(id),getLlmConfig,callModel,clock,evaluatorSkill,onCompleted,limiter}):null;
   function importBatch(body){
     if(ingestion)return ingestion.importBatch(body);
     const binding=null,sceneData=null; // 无场景服务的旧兼容路径；正式入口使用逐条导入服务。
@@ -91,7 +91,15 @@ function createBatchRating({storage,monitor,scenes,clock,getLlmConfig,callModel,
       }return clone(run);
     });
   }
+  function markItem(id,body){
+    const item=get('monitor_batch_items',id);
+    if(!item.case_id)fail('导入失败的记录不能标记');
+    if(item.attention_task_id)fail('请在关联改进待办中处理，确认无问题可登记为无需改进',409);
+    if(typeof body.marked!=='boolean')fail('标记状态必须为布尔值');
+    if(!!item.focus_marked===body.marked)return clone(item);
+    return clone(storage.update('monitor_batch_items',id,{focus_marked:body.marked,focus_marked_by:body.marked?text(body.actor,'标记人'):null,focus_marked_at:body.marked?new Date().toISOString():null}));
+  }
   function bootstrap(){return {...(ingestion?.bootstrap()||{}),evaluator_skill:evaluatorSkill.bootstrap(),batches:storage.list('monitor_batches'),batch_items:storage.list('monitor_batch_items'),rating_runs:storage.list('monitor_rating_runs'),ratings:storage.list('monitor_ratings'),batch_routing_reviews:ingestion?storage.list('monitor_batches').map(b=>ingestion.review(b.id)):[],routing_confirmations:storage.list('monitor_batch_confirmations'),rating_contract:{version:llm?require('./llm-rating').VERSION:RATING_VERSION,hash:llm?require('./llm-rating').PROMPT_HASH:RATING_HASH,grades:GRADE_DEFINITIONS,dimensions:DIMENSIONS,aggregation:llm?'按全局评估员评级；有场景方案时执行专属检查，无方案时基础分析；失败及不适用不计入等级分布':'关键错误L0优先，其次U，其余取最低等级；全诉求L3才是记录L3',denominator:'记录等级占已评唯一记录（含U）；待评及失败单独列示',method:llm?'按已确认方案文档逐条调用 LLM；保存结构化评级与引用依据':'已确认业务评估依据 + 受限事实执行器；未配置通用模型评级',llm_enabled:!!llm,sync_connector_connected:false}};}
-  return {importBatch,evaluate,bootstrap,startPlanTrial:body=>llm?llm.startPlanTrial(body):fail('请先配置分析模型',409),startEvaluatorTrial:body=>llm?llm.startTrial(body):fail('未配置 LLM 试评',409),getEvaluatorTrial:id=>llm.getTrial(id),getRatingRun:id=>llm?llm.getRun(id):clone(get('monitor_rating_runs',id)),waitForRating:id=>llm?.wait(id)||Promise.resolve(),preview:body=>ingestion.preview(body),resolveItem:(id,body)=>ingestion.resolveItem(id,body),routingReview:id=>ingestion.review(id),resolveGroup:(id,body)=>ingestion.resolveGroup(id,body),refreshRouting:(id,body)=>ingestion.refreshRoutes(id,body),confirmRouting:(id,body)=>ingestion.confirm(id,body)};
+  return {importBatch,evaluate,bootstrap,markItem,startPlanTrial:body=>llm?llm.startPlanTrial(body):fail('请先配置分析模型',409),startEvaluatorTrial:body=>llm?llm.startTrial(body):fail('未配置 LLM 试评',409),getEvaluatorTrial:id=>llm.getTrial(id),getRatingRun:id=>llm?llm.getRun(id):clone(get('monitor_rating_runs',id)),waitForRating:id=>llm?.wait(id)||Promise.resolve(),preview:body=>ingestion.preview(body),resolveItem:(id,body)=>ingestion.resolveItem(id,body),routingReview:id=>ingestion.review(id),resolveGroup:(id,body)=>ingestion.resolveGroup(id,body),refreshRouting:(id,body)=>ingestion.refreshRoutes(id,body),confirmRouting:(id,body)=>ingestion.confirm(id,body)};
 }
 module.exports={createBatchRating,gradeRecord,RATING_VERSION,RATING_HASH,DIMENSIONS};
