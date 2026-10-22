@@ -485,7 +485,7 @@ async function openReviewDetail(id) {
 
 /* 操作人：多人共用时按浏览器独立标识，回退到全局设置 */
 function myOperator() {
-  const mine = (localStorage.getItem('se_operator') || '').trim();
+  const mine = window.CsrAuth?.user?.name || (localStorage.getItem('se_operator') || '').trim();
   if (mine) return mine;
   const chip = $('operatorChip').textContent.replace('操作人：', '').trim();
   return chip && chip !== '未设置' ? chip : '';
@@ -1111,6 +1111,7 @@ async function loadCorrections() {
 /* ============ 启动 ============ */
 
 (async function init() {
+  await window.CsrAuth?.ready;
   await loadSettings();
   loadChatHistory();
   await refreshBadge();
@@ -1285,8 +1286,9 @@ async function loadAgentConfig() {
 
 async function loadSettings() {
   const b = await api('GET', '/api/bootstrap');
-  const mine = (localStorage.getItem('se_operator') || '').trim();
+  const mine = window.CsrAuth?.user?.name || (localStorage.getItem('se_operator') || '').trim();
   $('set_operator').value = mine || b.settings.operator || '';
+  $('set_operator').readOnly = !!window.CsrAuth?.user;
   $('set_operator').placeholder = '本浏览器署名，多人共用时各自填写（如：张三）';
   $('set_ratio').value = b.settings.spotcheck_ratio;
   $('set_llm_url').value = b.settings.llm_base_url || '';
@@ -1331,6 +1333,7 @@ function autoRefresh() {
 setInterval(autoRefresh, 20000);
 
 (async function init() {
+  await window.CsrAuth?.ready;
   await loadSettings();
   await refreshBadge();
 })();

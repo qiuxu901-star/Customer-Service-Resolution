@@ -21,7 +21,8 @@ jobs:
 
       - name: JS 语法检查
         run: |
-          find . -path './data' -prune -o -name '*.js' -print0 | xargs -0 -n 1 node --check
+          find . -path './data' -prune -o \( -name '*.js' -o -name '*.cjs' \) -print0 | xargs -0 -n 1 node --check
+          node --check ../scripts/prepare-production-data.cjs
           bash -n ../scripts/deploy.sh
 
       - name: 证据核验、版本和复验测试
@@ -34,6 +35,12 @@ jobs:
           npm run test:workspace:http
           npm run test:evaluator:http
           npm run test:learning:http
+          npm run test:diagnosis:http
+          npm run test:capability:http
+          npm run test:classification:http
+          npm run test:diagnosis:batch:http
+          node tests/service-maintenance-http.cjs
+          node tests/readability-http.cjs
 
       - name: 空白部署、后续升级和失败恢复演练
         run: npm run test:deploy
@@ -44,11 +51,10 @@ jobs:
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
           sleep 2
-          curl -sf http://localhost:8817/api/bootstrap > /dev/null && echo "bootstrap OK"
-          curl -sf http://localhost:8817/api/materials > /dev/null && echo "materials OK"
-          curl -sf -X POST http://localhost:8817/api/agent/chat \
-            -H 'Content-Type: application/json' \
-            -d '{"message":"当前完整方案可交付率是多少？"}' > /dev/null && echo "agent OK"
+          curl -sf http://localhost:8817/api/health > /dev/null
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8817/api/bootstrap)" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8817/api/monitor)" = 401
+          curl -sf http://localhost:8817/login > /dev/null
           kill $SERVER_PID
 
   release:

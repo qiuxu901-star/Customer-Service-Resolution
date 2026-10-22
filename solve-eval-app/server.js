@@ -21,6 +21,7 @@ const DATA_DIR = path.resolve(process.env.CSR_DATA_DIR || path.join(ROOT, 'data'
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const storage = new Storage(path.join(DATA_DIR, 'db.json'));
+const access = require('./auth').createAuth({ dataDir: DATA_DIR, send });
 seedStandards(storage);
 const modelConfigs = require('./model-configs').createModelConfigs({storage});
 ensureAgentConfig(storage);
@@ -43,8 +44,19 @@ function readBody(req) {
       chunks.push(c);
     });
     req.on('end', () => {
-      try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}); }
-      catch (e) { reject(new Error('JSON 解析失败')); }
+      try {
+        const value = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+        if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error();
+        // The account identity takes precedence over browser-local signatures.
+        if (req.user) {
+          const current = access.auth.current(req.headers.cookie);
+          if (!current) throw Object.assign(Error('登录已失效，请重新登录'), { statusCode: 401 });
+          if (current.user.must_change_password) throw Object.assign(Error('请先修改初始或重置密码'), { statusCode: 403, code: 'PASSWORD_CHANGE_REQUIRED' });
+          value.actor = current.user.name; value.operator = current.user.name;
+        }
+        resolve(value);
+      }
+      catch (e) { reject(e.statusCode ? e : new Error('JSON 解析失败')); }
     });
     req.on('error', reject);
   });
@@ -834,11 +846,47 @@ const monitor = createMonitoring({storage,getLlmConfig:selection=>modelConfigs.r
 const sceneRegistry = require('./scenes').createScenes({storage});
 const evaluatorSkill = require('./evaluator-skill').createEvaluatorSkill({storage});
 let monitorLearning;
-const batchRating = require('./batch-rating').createBatchRating({storage,onCompleted:()=>monitorLearning?.collect(),evaluatorSkill,monitor,scenes:sceneRegistry,getLlmConfig:selection=>modelConfigs.resolve(selection)});
+const modelCallLimiter = require('./model-call-limit').createCallLimiter(2);
+const issueTaxonomy = require('./issue-taxonomy').createIssueTaxonomy({storage});
+const issueClassification = require('./issue-classification').createIssueClassification({storage,taxonomy:issueTaxonomy});
+const issueClassificationAI = require('./issue-classification-ai').createIssueClassificationAI({storage,taxonomy:issueTaxonomy,classification:issueClassification,getLlmConfig:selection=>modelConfigs.resolve(selection),limiter:modelCallLimiter});
+const skillDiagnosis = require('./skill-diagnosis').createSkillDiagnosis({storage,getLlmConfig:selection=>modelConfigs.resolve(selection),limiter:modelCallLimiter});
+const serviceSkillLinks = require('./service-skill-links').createServiceSkillLinks({storage});
+const serviceSkills = require('./service-skills').createServiceSkills({storage,monitor});
+const batchSkillDiagnosis = require('./batch-skill-diagnosis').createBatchSkillDiagnosis({storage,diagnosis:skillDiagnosis,links:serviceSkillLinks,getLlmConfig:selection=>modelConfigs.resolve(selection),limiter:modelCallLimiter});
+const diagnosisService = id => storage.byId('service_skill_batch_diagnoses',id)?batchSkillDiagnosis:skillDiagnosis;
+const recordAttention = require('./record-attention').createRecordAttention({storage});
+const batchRating = require('./batch-rating').createBatchRating({storage,limiter:modelCallLimiter,onCompleted:()=>monitorLearning?.collect(),evaluatorSkill,monitor,scenes:sceneRegistry,getLlmConfig:selection=>modelConfigs.resolve(selection)});
 monitorLearning = require('./monitor-learning').createMonitorLearning({storage,monitor,scenes:sceneRegistry,startTrial:body=>batchRating.startPlanTrial(body)});
 const workspaceAgent = require('./workspace-agent').createWorkspaceAgent({storage,modelConfigs,getBatchRoutingReview:id=>batchRating.routingReview(id)});
-function evaluatorPublicState(){const {VERSION,SYSTEM,OUTPUT_CONTRACT,PROMPT_HASH}=require('./llm-rating');return {...evaluatorSkill.bootstrap(),system_protocol:{version:VERSION,system_prompt:SYSTEM,output_contract:OUTPUT_CONTRACT,prompt_hash:PROMPT_HASH}};}
+function evaluatorExecutionRows(){const all=storage.list('monitor_ratings'),seen=new Set();return [...all.filter(r=>r.status==='running'),...all.slice(-100).reverse()].filter(r=>{if(seen.has(r.id))return false;seen.add(r.id);return true;}).slice(0,100);}
+function evaluatorPublicState(){const {VERSION,SYSTEM,OUTPUT_CONTRACT,PROMPT_HASH}=require('./llm-rating');return {...evaluatorSkill.bootstrap(),executions:evaluatorExecutionRows().map(r=>({id:r.id,name:r.record_snapshot?.name||r.request_snapshot?.record?.name||r.id,status:r.status,error:r.error,created_at:r.created_at,started_at:r.started_at,finished_at:r.finished_at,model:r.model_snapshot?.model,evaluator_version:r.evaluator_skill_snapshot?.version,evaluation_flow:r.evaluation_flow,step_runs:r.step_runs,usage:r.usage,cost_estimate:r.cost_estimate,elapsed_ms:r.elapsed_ms})),system_protocol:{version:VERSION,system_prompt:SYSTEM,output_contract:OUTPUT_CONTRACT,prompt_hash:PROMPT_HASH}};}
 const monitorRoutes = {
+  'GET /api/monitor/issue-taxonomy': async () => issueTaxonomy.bootstrap(),
+  'POST /api/monitor/issue-taxonomy/revisions': async body => ({revision:issueTaxonomy.save(body)}),
+  'POST /api/monitor/issue-taxonomy/revisions/:id/activate': async (body,p) => ({revision:issueTaxonomy.activate(p.id,body)}),
+  'GET /api/monitor/issues/classification-history': async (body,p,req) => {const q=new URL(req.url,'http://localhost').searchParams;return {assignments:issueClassification.history().filter(a=>a.rating_id===q.get('rating_id')&&a.finding_index===Number(q.get('finding_index')))};},
+  'GET /api/monitor/issues': async (body,p,req) => ({issues:issueClassification.list(Object.fromEntries(new URL(req.url,'http://localhost').searchParams))}),
+  'POST /api/monitor/issues/classification-preview': async body => issueClassification.preview(body),
+  'POST /api/monitor/issues/classifications': async body => ({change:issueClassification.apply(body)}),
+  'POST /api/monitor/issue-classification-ai/preview': async body => issueClassificationAI.preview(body),
+  'POST /api/monitor/issue-classification-ai/runs': async body => ({run:issueClassificationAI.start(body)}),
+  'GET /api/monitor/issue-classification-ai/runs/:id': async (body,p) => ({run:issueClassificationAI.get(p.id)}),
+  'PATCH /api/monitor/issue-classification-suggestions/:id': async (body,p) => ({suggestion:issueClassificationAI.edit(p.id,body)}),
+  'POST /api/monitor/issue-classification-suggestions/:id/preview': async (body,p) => issueClassificationAI.applicationPreview(p.id),
+  'POST /api/monitor/issue-classification-suggestions/:id/apply': async (body,p) => ({suggestion:issueClassificationAI.apply(p.id,body)}),
+  'POST /api/monitor/ratings/:id/diagnoses/preview': async (body,p) => skillDiagnosis.preview(p.id,body),
+  'POST /api/monitor/ratings/:id/diagnoses': async (body,p) => ({diagnosis:skillDiagnosis.start(p.id,body)}),
+  'POST /api/monitor/service-skill-links': async body => serviceSkillLinks.bind(body),
+  'POST /api/monitor/batch-skill-diagnoses/preview': async body => batchSkillDiagnosis.preview(body),
+  'POST /api/monitor/batch-skill-diagnoses': async body => ({diagnosis:batchSkillDiagnosis.start(body)}),
+  'POST /api/monitor/skill-diagnoses/status': async body => {
+    if(!Array.isArray(body.ids)||!body.ids.length||body.ids.length>100||body.ids.some(id=>typeof id!=='string')||new Set(body.ids).size!==body.ids.length)throw Object.assign(Error('请选择1至100个不重复的诊断任务'),{statusCode:400});
+    return {diagnoses:body.ids.map(id=>{const {request_snapshot,request_messages,raw_response,system_prompt,output_contract,...state}=diagnosisService(id).get(id);return {...state,can_reparse:state.status==='failed'&&!!raw_response&&!!state.error?.startsWith('模型诊断结果无效：')};})};
+  },
+  'GET /api/monitor/skill-diagnoses/:id': async (body,p) => ({diagnosis:diagnosisService(p.id).get(p.id)}),
+  'POST /api/monitor/skill-diagnoses/:id/reparse': async (body,p) => ({diagnosis:diagnosisService(p.id).reparse(p.id,body)}),
+  'POST /api/monitor/skill-diagnoses/:id/tasks': async (body,p) => ({task:diagnosisService(p.id).createTask(p.id,body)}),
   'POST /api/monitor/learning/collect': async () => {monitorLearning.collect();return monitorLearning.bootstrap();},
   'POST /api/monitor/learning/drafts': async body => ({draft:monitorLearning.draft(body)}),
   'PATCH /api/monitor/learning/drafts/:id': async (body,p) => ({draft:monitorLearning.saveDraft(p.id,body)}),
@@ -854,7 +902,7 @@ const monitorRoutes = {
   'GET /api/monitor/conversations/:id': async (body,p) => ({conversation:workspaceAgent.read(p.id)}),
   'POST /api/monitor/conversations/:id/messages': async (body,p) => ({conversation:await workspaceAgent.send(p.id,body)}),
   'POST /api/monitor/conversations/:id/batches': async (body,p) => ({conversation:workspaceAgent.attachBatch(p.id,body)}),
-  'GET /api/monitor': async () => ({...monitor.bootstrap(),...batchRating.bootstrap(),...sceneRegistry.bootstrap(),model_config:modelConfigs.state(),model_configured:modelConfigs.state().configured,rating_reviews:storage.list('monitor_rating_reviews'),evaluator_skill:evaluatorPublicState(),monitor_learning:monitorLearning.bootstrap(),skill_improvement_version:'customer-skill-improvement/v1'}),
+  'GET /api/monitor': async (body,p,req) => ({record_views:recordAttention.views(req.user.id),...monitor.bootstrap(),services:serviceSkills.list(),...batchRating.bootstrap(),...sceneRegistry.bootstrap(),model_config:modelConfigs.state(),model_configured:modelConfigs.state().configured,rating_reviews:storage.list('monitor_rating_reviews'),evaluator_skill:evaluatorPublicState(),monitor_learning:monitorLearning.bootstrap(),skill_improvement_version:'customer-skill-improvement/v2',skill_diagnoses:[...storage.list('service_skill_diagnoses'),...storage.list('service_skill_batch_diagnoses')].sort((a,b)=>a.created_at.localeCompare(b.created_at)),service_skill_links:serviceSkillLinks.bootstrap(),issue_taxonomy:issueTaxonomy.bootstrap(),issue_classifications:issueClassification.list(),issue_classification_ai_runs:issueClassificationAI.list()}),
   'POST /api/monitor/ratings/:id/review': async (body,p) => {const review=workspaceAgent.reviewRating(p.id,body);try{monitorLearning.collect();return {review};}catch{return {review,learning_error:'复核已保存，检查建议暂未整理，可稍后重试'};}},
   'POST /api/monitor/ratings/:id/tasks': async (body,p) => ({task:workspaceAgent.createRatingTask(p.id,body)}),
   'PATCH /api/monitor/rating-tasks/:id': async (body,p) => ({task:workspaceAgent.updateRatingTask(p.id,body)}),
@@ -876,6 +924,12 @@ const monitorRoutes = {
   'POST /api/monitor/scenes/:id/map': async (body,p) => sceneRegistry.mapLegacy(p.id,body),
   'POST /api/monitor/examples': async body => ({example:sceneRegistry.example(body)}),
   'POST /api/monitor/batches/preview': async body => batchRating.preview(body),
+  'POST /api/monitor/batch-items/:id/view': async (body,p,req) => ({view:recordAttention.viewed(p.id,body,req.user)}),
+  'POST /api/monitor/batch-items/:id/attention/cancel': async (body,p,req) => recordAttention.cancel(p.id,body,req.user),
+  'POST /api/monitor/batch-items/:id/attention': async (body,p,req) => recordAttention.mark(p.id,body,req.user),
+  'PATCH /api/monitor/attention-tasks/:id': async (body,p,req) => recordAttention.updateTask(p.id,body,req.user),
+  'PATCH /api/monitor/batch-items/:id/attention': async (body,p,req) => ({item:recordAttention.saveMarks(p.id,body,req.user)}),
+  'PATCH /api/monitor/batch-items/:id/mark': async (body,p,req) => ({item:batchRating.markItem(p.id,{...body,actor:req.user.name})}),
   'POST /api/monitor/batch-items/:id/resolve': async (body,p) => ({routing:batchRating.resolveItem(p.id,body)}),
   'POST /api/monitor/batches': async body => ({batch:batchRating.importBatch(body)}),
   'GET /api/monitor/batches/:id/routing': async (body,p) => batchRating.routingReview(p.id),
@@ -884,17 +938,27 @@ const monitorRoutes = {
   'POST /api/monitor/batches/:id/routing/confirm': async (body,p) => ({confirmation:batchRating.confirmRouting(p.id,body)}),
   'GET /api/monitor/rating-runs/:id': async (body,p) => ({run:batchRating.getRatingRun(p.id)}),
   'POST /api/monitor/batches/:id/rate': async (body,p) => ({run:batchRating.evaluate(p.id,body)}),
-  'POST /api/monitor/services': async body => ({service:monitor.importService(sceneRegistry.attach(body))}),
+  'POST /api/monitor/services': async body => ({service:serviceSkills.create(sceneRegistry.attach(body))}),
+  'PATCH /api/monitor/services/:id': async (body,p) => ({service:serviceSkills.edit(p.id,body)}),
+  'POST /api/monitor/services/:id/activate': async (body,p) => ({service:serviceSkills.activate(p.id,body)}),
+  'DELETE /api/monitor/services/:id': async (body,p) => serviceSkills.remove(p.id,body),
   'POST /api/monitor/evaluate': async body => ({run:monitor.evaluate(body)}),
   'POST /api/monitor/compare': async body => ({run:monitor.compare(body)}),
   'POST /api/monitor/replay': async body => ({run:await monitor.replay(body)}),
   'POST /api/monitor/tasks': async body => ({task:monitor.task(body)}),
   'PATCH /api/monitor/tasks/:id': async (body,p) => ({task:monitor.updateTask(p.id,body)}),
 };
-for(const [route,handler] of Object.entries(monitorRoutes))routes[route]=async (req,res,params)=>send(res,200,await handler(req.method==='GET'?{}:await readBody(req),params));
+for(const [route,handler] of Object.entries(monitorRoutes))routes[route]=async (req,res,params)=>{
+  const body=req.method==='GET'?{}:await readBody(req);
+  const definitionWrite=route.startsWith('POST /api/monitor/issue-taxonomy/')||route.startsWith('PATCH /api/monitor/issue-classification-suggestions/')&&body.decision!=='reject';
+  const applyingDefinition=route.endsWith('/apply')&&route.includes('issue-classification-suggestions')&&['new','update'].includes(storage.byId('issue_classification_suggestions',params.id)?.action);
+  if((definitionWrite||applyingDefinition)&&!req.user?.is_admin)throw Object.assign(Error('仅管理员可维护和发布问题分类定义'),{statusCode:403});
+  send(res,200,await handler(body,params,req));
+};
 
 const server = http.createServer(async (req, res) => {
   try {
+    if (await access.gate(req, res)) return;
     const route = parseRoute(req.method, req.url);
     if (route) return await route.handler(req, res, route.params);
     if(req.url.split('?')[0].startsWith('/api/'))return send(res,404,{error:'接口不存在：'+req.method+' '+req.url.split('?')[0]+'，请确认服务已更新。'});
@@ -902,13 +966,16 @@ const server = http.createServer(async (req, res) => {
     let fp = req.url.split('?')[0];
     if (fp === '/') fp = '/workbench.html';
     if (fp === '/legacy') fp = '/index.html';
+    if (fp === '/login') fp = '/login.html';
+    if (fp === '/account') fp = '/account.html';
+    if (fp === '/accounts') fp = '/accounts.html';
     const abs = path.normalize(path.join(PUBLIC, fp));
-    if (!abs.startsWith(PUBLIC)) { res.writeHead(403); return res.end('forbidden'); }
+    if (!abs.startsWith(PUBLIC + path.sep)) { res.writeHead(403); return res.end('forbidden'); }
     if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) { res.writeHead(404); return res.end('not found'); }
     res.writeHead(200, { 'Content-Type': MIME[path.extname(abs)] || 'application/octet-stream' });
     fs.createReadStream(abs).pipe(res);
   } catch (e) {
-    send(res, e.statusCode || 500, { error: e.message });
+    send(res, e.statusCode || 500, { error: e.message, ...(e.code ? { code: e.code } : {}) });
   }
 });
 

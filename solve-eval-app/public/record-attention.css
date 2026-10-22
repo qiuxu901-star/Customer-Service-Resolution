@@ -1,0 +1,9 @@
+.record-problem-tag{display:inline-block;padding:3px 7px;border-radius:5px;font-size:12px;line-height:1.6}
+.mark-evaluation{background:#edf3fb;color:#315984}.mark-ai{background:#fff4de;color:#805617}.mark-legacy{background:#f5f0e5;color:#716047}
+.record-view-unviewed{color:#315e4d;background:#eef5ef}.record-view-unviewed::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:5px}
+.record-view-viewed{color:#64748b;background:#f1f5f9}
+.problem-mark-section{padding:17px 0;border-bottom:1px solid #e2e8f0}.problem-mark-choice{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;cursor:pointer}.problem-mark-choice input{accent-color:#315e4d;width:16px;height:16px}.problem-mark-choice small{margin-left:auto;color:#64748b;font-size:12px;font-weight:400}
+.problem-mark-section textarea{min-height:90px;line-height:1.8}.problem-mark-section [hidden]{display:none}
+.record-attention-notes{margin:20px 0;padding:16px 0;border-top:1px solid #e2e8f0}.record-problem-note{padding:12px 14px;background:#f7f9f7;border:1px solid #e1e8e2;border-radius:7px;margin:10px 0}.record-problem-note h4{margin:0 0 8px;font-size:13px}.record-problem-note p{font-size:13px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}.record-problem-note small{font-size:12px;color:#64748b}.evidence-heading-actions{flex-wrap:wrap;justify-content:flex-end}
+
+.task-state{white-space:nowrap}.record-attention-notes .notice{display:flex;align-items:center;gap:10px;flex-wrap:wrap}

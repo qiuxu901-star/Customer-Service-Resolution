@@ -11,7 +11,7 @@ const skill={id:'SK',code:'PICKUP_NON_AUDIO',version:'1',scene_id:'S',scene:'接
 const binding={plan_id:'P',revision_id:'R',definition:{name:'监测',scene_id:'S',scene:'接驾异常',scope:'tier2',document:'核对话单，缺失保留 U。\n不适用单列。',service_refs:['SK'],service_bindings:[{id:'SK',content_hash:skill.content_hash,modules:['module_1']}]}};
 const record={name:'工单1',scope:'tier2',scene_id:'S',scene:'接驾异常',ai_reply:'已核对话单。\n下一行。',session_text:'请核实',evidence:[]};
 const inputOf=(r=record,b=binding)=>buildInput(r,b,{getService:id=>id===skill.id?skill:null});
-const valueOf=input=>{const evidence=input.reference_index.find(r=>r.role==='ai_output'),rule=input.reference_index.find(r=>r.role==='service_skill'&&r.text.includes('核对话单'));return {applicability:'applicable',grade:'L1',grade_basis:gradeBasis(input,'L1'),summary:'取证需要复核',dimensions:[{name:'取证',status:'gap',reason:'需补查',rule_refs:[rule.id],evidence_refs:[evidence.id]}],findings:[{type:'GAP',description:'需核实话单',rule_refs:[rule.id],evidence_refs:[evidence.id],suggestion:'补充话单'}],missing_materials:[],requires_review:false};};
+const valueOf=input=>{const evidence=input.reference_index.find(r=>r.role==='ai_output'),rule=input.reference_index.find(r=>r.role==='monitoring_plan'&&r.text.includes('核对话单'));return {applicability:'applicable',grade:'L1',...require('./helpers-rating.cjs').helpReport(input,'L1'),grade_basis:gradeBasis(input,'L1'),summary:'取证需要复核',dimensions:[{name:'取证',status:'gap',reason:'需补查',rule_refs:[rule.id],evidence_refs:[evidence.id]}],findings:[{type:'GAP',title:'话单情况需要核实',evidence_reason:'AI称已核对话单，本次未提供独立话单记录。',suggestion_reason:'补充话单可以核实AI陈述是否准确。',description:'需核实话单',rule_refs:[rule.id],evidence_refs:[evidence.id],suggestion:'补充话单'}],missing_materials:[],requires_review:false};};
 function fixture(t,config={}){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'csr-cost-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
   const storage=new Storage(path.join(dir,'db.json')),monitor=createMonitoring({storage,getLlmConfig:()=>({})}),scenes=createScenes({storage});
@@ -43,7 +43,7 @@ test('只发送选中定义，静态消息完全相同，工单在最后，正�
   assert.equal(ma.length,3);assert.deepEqual(ma.slice(0,2),mb.slice(0,2));assert.notEqual(ma[2].content,mb[2].content);
   assert.doesNotMatch(JSON.stringify(ma),/不属于本场景的取消规则/);
   const fixed=JSON.parse(ma[1].content),dynamic=JSON.parse(ma[2].content);
-  assert.ok(fixed.rules.some(r=>r.role==='service_skill'&&r.segments.some(s=>s.text==='核对话单\n不得推断已核实')));
+  assert.ok(fixed.rules.some(r=>r.role==='monitoring_plan'));assert.ok(fixed.rules.every(r=>r.role!=='service_skill'));assert.equal(contextStats(a,SYSTEM).skill_chars,0);
   assert.equal(fixed.monitoring_plan.document,undefined);assert.equal(dynamic.sources.filter(r=>r.role==='ai_output').flatMap(r=>r.segments.map(s=>s.text)).join(''),record.ai_reply);
   assert.equal(contextStats(a,SYSTEM).prefix_hash,contextStats(b,SYSTEM).prefix_hash);
   const changed=structuredClone(binding);changed.definition.document+='新例外';assert.notEqual(contextStats(a,SYSTEM).prefix_hash,contextStats(inputOf(record,changed),SYSTEM).prefix_hash);
@@ -78,12 +78,10 @@ test('供应商请求不盲目添加缓存参数，输出预算传入，失败 J
   const result=await requestRating(input,config,{fetchImpl});assert.equal(sent.max_tokens,1024);assert.equal(sent.prompt_cache_key,undefined);assert.equal(result.usage.cached_tokens,70);assert.deepEqual(sent.messages,messagesFor(input,SYSTEM));
   for(const [content,finish_reason]of [['not JSON','stop'],['{}','length']])await assert.rejects(()=>requestRating(input,config,{fetchImpl:async()=>({ok:true,json:async()=>({choices:[{message:{content},finish_reason}],usage:{prompt_tokens:100,completion_tokens:30,prompt_cache_hit_tokens:50}})})}),e=>e.usage.prompt_tokens===100&&e.usage.cached_tokens===50&&e.raw_response===content);
 });
-test('多定义方案可存草稿但不能确认，历史已确认批次也不绕过新前置检查',t=>{
-  const x=fixture(t);assert.throws(()=>x.monitor.confirm(x.draft.plan_id,{revision_id:x.draft.id,actor:'测试'}),/具体定义/);
-  x.storage.update('monitor_revisions',x.draft.id,{confirmed:true}); // Simulate a pre-v3 historical confirmed plan.
+test('关联多定义尚未确认不阻止方案和整批确认，仅作为诊断时提示',t=>{
+  const x=fixture(t);x.monitor.confirm(x.draft.plan_id,{revision_id:x.draft.id,actor:'测试'});
   const b=x.batches.importBatch({actor:'测试',request_id:'B',source_kind:'file',source_name:'合成',records:[{...record,scene_id:x.scene.id}]});
-  const review=x.batches.routingReview(b.id);assert.equal(review.can_confirm,false);assert.match(review.groups[0].reason,/具体定义/);
-  assert.throws(()=>x.batches.evaluate(b.id,{actor:'测试',request_id:'R'}),/整批确认/);assert.equal(x.calls.length,0);
+  const review=x.batches.routingReview(b.id);assert.equal(review.can_confirm,true);assert.equal(review.groups[0].service_skills[0].ready,false);confirmBatch(x.batches,b.id);assert.equal(x.batches.routingReview(b.id).confirmed,true);assert.equal(x.calls.length,0);
 });
 test('明确选择后冻结父子 hash，预算超限阻止整批且零调用，失败评级仍保存已知用量',async t=>{
   const x=fixture(t,{rating_options:{max_input_chars:1}});
@@ -96,5 +94,5 @@ test('明确选择后冻结父子 hash，预算超限阻止整批且零调用，
   const run=unrestricted.evaluate(batch.id,{actor:'测试',request_id:'R2'});await unrestricted.waitForRating(run.id);const saved=x.storage.list('monitor_ratings')[0];assert.equal(saved.status,'failed');assert.equal(saved.usage.cached_tokens,50);assert.ok(saved.context_stats.prefix_hash);
   assert.doesNotMatch(JSON.stringify(saved),/api_key/);
   const original=structuredClone(saved.request_snapshot);x.storage.update('service_skills',x.service.id,{raw:'changed'});
-  assert.equal(unrestricted.routingReview(batch.id).confirmed,false);assert.deepEqual(saved.request_snapshot,original);
+  assert.equal(unrestricted.routingReview(batch.id).confirmed,true);assert.deepEqual(saved.request_snapshot,original);
 });

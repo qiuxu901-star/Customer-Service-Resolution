@@ -31,13 +31,18 @@
   const headers=matrix.shift().map(x=>String(x).trim());
   if(headers.some(x=>!x))throw Error('Excel存在空白列名，请确保第一行为完整表头');
   if(new Set(headers).size!==headers.length)throw Error('Excel表头重复，请核对列名');
+  const idLabels=new Set(['工单ID','会话ID','订单号','租户id','traceId','ticket_id','session_id','order_id','tenant_id','trace_id']);
+  for(let c=0;c<headers.length;c++)if(idLabels.has(headers[c]))for(let r=range.s.r+1;r<=range.e.r;r++){
+   const cell=sheet[xlsx.utils.encode_cell({r,c:c+range.s.c})];
+   if(cell?.t==='n'&&!Number.isSafeInteger(cell.v))throw Error(headers[c]+'包含可能丢失精度的数字编号，请由来源系统按文本导出');
+  }
   const rows=matrix.filter(row=>row.some(x=>String(x).trim())).map(row=>Object.fromEntries(headers.map((h,i)=>[h,String(row[i]??'')])));
   if(rows.length>2000)throw Error('每批最多2000条记录，请拆分导入');
   if(!rows.length)throw Error('所选工作表没有可导入记录');
   return rows;
  }
- function template(kind){
-  const schema=business.schemas[kind];if(!schema)throw Error('请先选择一线或二线，再下载Excel模板');
+ function template(kind,profile){
+  const schema=business.templateSchema(kind,profile);if(!schema)throw Error('请先选择一线或二线，再下载Excel模板');
   const sheet=xlsx.utils.aoa_to_sheet([schema.fields.map(([,label])=>label)]);
   sheet['!cols']=schema.fields.map(([key])=>({wch:/text|reply|conclusion|summary|opinion/.test(key)?52:24}));
   sheet['!rows']=[{hpt:28}];sheet['!autofilter']={ref:sheet['!ref']};

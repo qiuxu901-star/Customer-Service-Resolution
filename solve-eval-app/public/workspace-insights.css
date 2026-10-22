@@ -1,6 +1,18 @@
 /* Summary first; supporting material opens in place. */
 .insight-details{padding:0}
 .insight-summary-more{display:flex;gap:18px;flex-wrap:wrap;border-top:1px solid #e8ece9;margin-top:8px}
+.insight-record-table.evaluation-summary-table{table-layout:fixed;min-width:880px;width:100%}
+.insight-record-table.evaluation-summary-table th:nth-child(1){width:21%}
+.insight-record-table.evaluation-summary-table th:nth-child(2){width:27%}
+.insight-record-table.evaluation-summary-table th:nth-child(3){width:23%}
+.insight-record-table.evaluation-summary-table th:nth-child(4){width:20%}
+.insight-record-table.evaluation-summary-table th:nth-child(5){width:9%}
+.insight-record-table.evaluation-summary-table td{vertical-align:top;white-space:normal;overflow-wrap:anywhere}
+.evaluation-summary-table .record-summary-text,.evaluation-summary-table .record-summary-more p{margin:0;font-size:13px;line-height:1.7;white-space:pre-wrap}
+.evaluation-summary-table .record-summary-more>summary{font-size:13px;line-height:1.7;cursor:pointer;color:var(--ink)}
+.evaluation-summary-table .record-summary-more[open]>summary{margin-bottom:8px}
+.evaluation-summary-table .evaluation-readability-label{display:block;font-size:13px;font-weight:600;margin-bottom:6px}
+.evaluation-summary-table .insight-list-meta{margin-top:8px;flex-wrap:wrap}
 .insight-summary-more>.insight-details{margin:0;border:0;flex:0 1 auto;background:transparent}
 .insight-summary-more>.insight-details>summary{padding-left:0;padding-right:8px}
 .insight-summary-more>.insight-details[open]{flex-basis:100%;order:1}
@@ -21,4 +33,73 @@
 @media(max-width:700px){.insight-overview{padding:18px}.insight-lead{font-size:17px}.insight-issue{grid-template-columns:22px minmax(0,1fr);gap:10px}.insight-issue>.btn{grid-column:2;justify-self:start}.insight-range{line-height:1.8}.insight-record-body{padding:20px 18px}.insight-record-lead{font-size:17px}.insight-answer{padding:15px}.insight-answer>div{grid-template-columns:1fr;gap:5px}.insight-record-table td:first-child{min-width:140px}.insight-record-table td:nth-child(2){min-width:220px}.insight-record-table td:last-child{min-width:90px}.insight-details-body{padding:14px}}
 
 /* A finding becomes a reviewable customer-service Skill change. */
+.record-detail-tabs{position:sticky;top:-24px;z-index:2;display:flex;align-items:stretch;gap:22px;margin:-24px -28px 22px;padding:0 28px;background:var(--paper,#fff);border-bottom:1px solid var(--line,#dfe8e2)}
+.record-detail-tabs>button{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:56px;padding:14px 0;border:0;border-bottom:2px solid transparent;background:transparent;color:#64748b;font:inherit;font-size:14px;text-align:left;cursor:pointer}
+.record-detail-tabs>button[aria-selected="true"]{border-bottom-color:#315e4d;color:#315e4d;font-weight:600}
+.record-detail-tabs>button:hover{color:#315e4d}.record-detail-tabs>button:focus-visible{outline:2px solid #527a67;outline-offset:-2px;border-radius:4px}
+.record-diagnosis-status{font-size:11px;font-weight:400;line-height:1.7;color:#56685c;background:#eef3ef;border-radius:5px;padding:2px 6px}
+.record-detail-panel[hidden]{display:none}.record-detail-panel:focus-visible{outline:2px solid #527a67;outline-offset:4px}
+.record-detail-panel>.diagnosis-panel{margin:0;padding:0;border:0}
+.record-diagnosis-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.insight-record-drawer .evidence-footer>.actions{flex-wrap:wrap}.insight-record-drawer .evidence-footer .btn{white-space:normal}
+@media(max-width:700px){.record-detail-tabs{top:-20px;margin:-20px -18px 20px;padding:0 18px;gap:16px}.record-detail-tabs>button{font-size:13px;gap:5px}.record-diagnosis-status{font-size:11px}.insight-record-drawer .evidence-footer>.actions{width:100%}}
+
 .insight-change{display:block;background:#fbfcfb;border:1px solid #dfe8e2!important;border-radius:10px;padding:22px;margin:18px 0}.insight-change>.insight-issue-title{margin-bottom:20px}.insight-change-fields{margin:0}.insight-change-fields>div{display:grid;grid-template-columns:110px minmax(0,1fr);gap:18px;margin:15px 0}.insight-change-fields dt{font-size:13px;line-height:1.9;color:#56685d}.insight-change-fields dd{margin:0;font-size:14px;line-height:1.9;white-space:pre-wrap;overflow-wrap:anywhere;color:#2d4034}.insight-change-fields>div:nth-child(2) dd{color:#28583e}.insight-change .insight-details{margin:18px 0;background:#fff}.insight-change>.actions{gap:10px}.insight-change .btn{min-height:44px;white-space:normal}.insight-source{padding:16px 0;border-bottom:1px solid #e0e8e3}.insight-source p{font-size:13px;line-height:1.9;white-space:pre-wrap;overflow-wrap:anywhere}.insight-source blockquote{padding:12px;background:#f3f7f4;border-left:3px solid #9bb6a4;white-space:pre-wrap;overflow-wrap:anywhere}.skill-change-editor textarea,.skill-change-export textarea{min-height:110px;font-size:14px;line-height:1.8;resize:vertical}.skill-change-export{padding-top:24px;margin-top:24px;border-top:1px solid #dfe8e1}.skill-change-export textarea{width:100%;min-height:260px;box-sizing:border-box}.skill-change-export h3{font-size:16px}.skill-change-export .btn{margin-top:12px;min-height:44px}@media(max-width:700px){.insight-change{padding:17px}.insight-change-fields>div{grid-template-columns:1fr;gap:4px}.insight-change-fields dt{font-weight:600}.insight-change>.actions{flex-direction:column;align-items:stretch}.insight-change .insight-issue-title{gap:9px}}
+
+/* Read each finding as a short explanation, with its supporting case beside it. */
+.finding-explanation{max-width:850px;padding:4px 0 12px;color:#2d4034;overflow-wrap:anywhere}
+.finding-case{font-size:12px;line-height:1.8;color:#6c7d71;margin:14px 0 8px;padding-bottom:12px;border-bottom:1px solid #e6ece7}
+.finding-section{margin:0;padding:17px 0;border-bottom:1px solid #edf0ed;min-width:0}
+.finding-section:last-child{border-bottom:0}
+.finding-section h4{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600;line-height:1.6;color:#506558;margin:0 0 9px}
+.finding-section h4>span{font-size:10px;font-variant-numeric:tabular-nums;letter-spacing:.06em;color:#84958a;flex-shrink:0}
+.finding-section>p{font-size:14px;line-height:1.95;margin:0;white-space:pre-wrap}
+.finding-problem>p{font-size:16px;line-height:1.85;font-weight:500;color:#263e2f}
+.finding-action{background:#f3f8f4;border:1px solid #dfebe2;border-left:3px solid #63866e;border-radius:7px;padding:15px 17px;margin:16px 0 0}
+.finding-action h4,.finding-action>p{color:#315740}
+.finding-reason{padding-top:16px}
+.finding-section .finding-unavailable{font-size:12px;line-height:1.9;color:#7c887f}
+.finding-quote{margin:12px 0 0;padding:12px 15px;background:#f7f8f6;border-radius:6px;border:1px solid #e8ece6}
+.finding-quote .finding-citation{margin:0 0 7px!important;font-size:11px!important;line-height:1.7!important;color:#7a857b;white-space:normal}
+.finding-quote blockquote{margin:0!important;padding:0 0 0 12px!important;background:transparent!important;border:0!important;border-left:2px solid #becdbc!important;font-size:13px!important;line-height:1.9;white-space:pre-wrap;overflow-wrap:anywhere;color:#526052}
+.finding-quote summary,.finding-more-quotes>summary{font-size:12px;line-height:1.85;color:#68796b;cursor:pointer;white-space:pre-wrap;overflow-wrap:anywhere}
+.finding-quote summary>span{display:block;font-size:11px;color:#3e674c;margin-top:6px}
+.finding-quote details[open]>summary{margin-bottom:12px}
+.finding-more-quotes{margin-top:13px}
+.insight-record-body .finding-problem>p{font-size:14px}
+.insight-record-body .finding-section>p{font-size:13px}
+.insight-record-body .finding-section .finding-unavailable{font-size:12px}
+@media(max-width:700px){.finding-section{padding:14px 0}.finding-section>p{font-size:13px}.finding-problem>p{font-size:14px}.finding-action{padding:12px;margin-top:14px}.finding-quote{padding:10px}.finding-case{font-size:11px}.finding-section h4{font-size:12px}}
+/* Keep human handling and the AI responsibility conclusion above supporting material. */
+.evidence-source .review-source-title{font-size:12px;color:#748278;margin:0 0 14px;font-weight:500;letter-spacing:.04em}
+.record-review-focus{display:grid;gap:16px;margin-bottom:22px}
+.review-human-panel,.review-ai-panel{border:1px solid #dfe6df;border-radius:8px;padding:18px 20px;background:#fff}
+.evidence-source .review-human-panel>h3,.evidence-source .review-ai-heading>h3{font-size:16px;color:#283d32;margin:0 0 15px;line-height:1.5}
+.review-human-panel{border-left:3px solid #9a9a81;background:#fdfcf8}
+.review-ai-panel{border-left:3px solid #537d62;background:#f3f7f1}
+.evidence-source .review-request h4,.evidence-source .review-human-decision h4{margin:0 0 7px;color:#798174;font-size:12px;font-weight:500}
+.review-human-decision{border-top:1px solid #e7e7da;margin-top:15px;padding-top:15px}
+.review-key-text{font-size:14px;line-height:1.85;color:#293b32;white-space:pre-wrap;overflow-wrap:anywhere}
+.review-key-missing{font-size:13px;color:#899187;margin:0}
+.review-ai-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.review-responsibility{font-size:12px;color:#385f46;background:#e4eddf;padding:4px 8px;border-radius:4px;margin-bottom:12px}
+.record-other-materials{border-top:1px solid #e1e6de;margin-top:16px;padding-top:6px}
+.record-other-materials>summary{font-size:13px;padding:12px 0;cursor:pointer;color:#69786c}
+.insight-full-report .llm-report-summary{padding:17px 20px;margin:6px 0 16px;background:#f4f7f1;border-left:3px solid #537d62}
+.insight-full-report .llm-report-summary>h3{font-size:13px;margin:16px 0 12px;color:#758172;font-weight:500}
+.evaluation-conclusion-parts{display:grid;gap:13px}
+.evaluation-conclusion-part+.evaluation-conclusion-part{border-top:1px solid #dfe7da;padding-top:13px}
+.llm-report-summary .evaluation-conclusion-part h4,.insight-record-summary .evaluation-conclusion-part h4{font-size:14px;color:#2d4737;margin:0 0 5px}
+.insight-full-report .llm-report-summary .evaluation-conclusion-part p,.evaluation-conclusion-part p{font-size:14px;line-height:1.75;color:#344338;margin:0;overflow-wrap:anywhere}
+.evaluation-conclusion-part details{margin-top:5px;font-size:12px}.evaluation-conclusion-part details summary{cursor:pointer;color:#71826e}
+.legacy-conclusion{margin-top:12px;font-size:12px}.legacy-conclusion>summary{cursor:pointer;color:#71826e}.legacy-conclusion p{white-space:pre-wrap}
+.evaluation-task-line{font-size:12px;line-height:1.75;color:#788477;margin:12px 0 18px}.evaluation-task-line strong{font-weight:500}
+@media(max-width:700px){.review-human-panel,.review-ai-panel{padding:15px}.review-key-text{font-size:13px}.insight-full-report .llm-report-summary{padding:15px}}
+.evidence-source .record-supporting-materials{border:0;border-top:1px solid #dde5dc;background:transparent;margin-top:12px}
+.record-supporting-materials>summary{padding:14px 0;font-size:13px;color:#647a67;cursor:pointer}
+.record-supporting-materials[open]>summary{margin-bottom:8px}
+.review-context-line{display:flex;align-items:center;flex-wrap:nowrap;gap:16px;min-width:0;margin:0 0 14px;font-size:12px;line-height:1.7;color:#68796d}
+.review-context-field{display:flex;align-items:baseline;flex:1 1 0;min-width:0;gap:2px}
+.review-context-label{flex-shrink:0;color:#879187;font-size:11px;font-weight:400}
+.review-context-value{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:400}
+.output-readability{padding:18px 0 20px;margin:12px 0 20px;border-top:1px solid #e1e8df;border-bottom:1px solid #e1e8df}.output-readability>.panel-head{gap:12px;margin-bottom:10px}.output-readability h3{font-size:15px;margin:0}.output-readability p{font-size:14px;line-height:1.8;margin:8px 0;overflow-wrap:anywhere}.readability-issues{display:flex;flex-wrap:wrap;gap:6px}.readability-issues span{background:#f6f1e6;color:#836535;padding:3px 8px;border-radius:4px;font-size:12px}.readability-suggestions{margin-top:14px}.readability-suggestions>summary{font-size:13px;color:#456c50;cursor:pointer}.readability-recommendation{margin-top:14px;background:#f6f8f4;border:1px solid #e1e7dc;padding:16px;border-radius:8px}.readability-recommendation h4{font-size:13px;margin:16px 0 12px;color:#52634c}.readability-rewrite{margin:0}.readability-rewrite>div{display:grid;grid-template-columns:128px minmax(0,1fr);gap:10px;margin-top:12px}.readability-rewrite dt{font-size:13px;font-weight:600;color:#435a3d}.readability-rewrite dd{font-size:14px;line-height:1.8;margin:0;white-space:pre-wrap;overflow-wrap:anywhere}@media(max-width:650px){.readability-rewrite>div{grid-template-columns:1fr;gap:4px}}

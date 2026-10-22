@@ -84,18 +84,26 @@ fs.renameSync(args[0],args[1]);
     assert.ok(fs.readFileSync(unitFile, 'utf8').includes('CSR_DATA_DIR=' + cleanData));
     const snapshot = '{"new_record":"persist-on-next-update","settings":{}}';
     write(path.join(cleanData, 'db.json'), snapshot);
+    const accounts = '{"version":1,"users":[{"id":"synthetic-admin"}],"sessions":[],"audit":[]}';
+    write(path.join(cleanData, 'auth.json'), accounts);
     const update = deploy();
     assert.equal(update.status, 0, update.stderr + update.stdout);
     const updatedRelease = fs.readlinkSync(path.join(app, 'current'));
     assert.notEqual(updatedRelease, firstRelease);
     assert.equal(fs.readlinkSync(path.join(updatedRelease, 'solve-eval-app/data')), cleanData);
     assert.equal(fs.readFileSync(path.join(cleanData, 'db.json'), 'utf8'), snapshot);
+    assert.equal(fs.readFileSync(path.join(cleanData, 'auth.json'), 'utf8'), accounts);
+    assert.ok(fs.readdirSync(path.join(app, 'backups')).some(name => {
+      const file = path.join(app, 'backups', name, 'auth.json');
+      return fs.existsSync(file) && fs.readFileSync(file, 'utf8') === accounts;
+    }), 'normal upgrade backs up account data');
     const goodUnit = fs.readFileSync(unitFile, 'utf8');
     const failed = deploy({ RESET_DATA: '1', FAKE_CURL_FAIL: '1' });
     assert.equal(failed.status, 1, failed.stderr + failed.stdout);
     assert.equal(fs.readlinkSync(path.join(app, 'current')), updatedRelease);
     assert.equal(fs.readFileSync(unitFile, 'utf8'), goodUnit);
     assert.equal(fs.readFileSync(path.join(cleanData, 'db.json'), 'utf8'), snapshot);
+    assert.equal(fs.readFileSync(path.join(cleanData, 'auth.json'), 'utf8'), accounts);
     assert.equal(JSON.parse(fs.readFileSync(stateFile, 'utf8')).active, true);
     assert.match(failed.stdout, /已恢复旧版本链接和服务配置/);
     // A legacy installation must also recover its original unit on first-update failure.

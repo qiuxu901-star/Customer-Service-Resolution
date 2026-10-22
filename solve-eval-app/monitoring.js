@@ -7,7 +7,7 @@ const now = () => new Date().toISOString();
 const scopes = ['bot', 'frontline', 'tier2', 'linked'];
 const JUDGE_VERSION = 'call-count-consistency/v2';
 const PlanDocument = require('./public/plan-document');
-const {selectSkill,planSkills}=require('./skill-context');
+const {selectSkill}=require('./skill-context');
 const fail = (message, code=400) => { const error=new Error(message); error.statusCode=code; throw error; };
 const requireText = (value,label) => { if(typeof value!=='string'||!value.trim())fail('请填写'+label); return value.trim(); };
 function extractContactClaim(reply) {
@@ -78,7 +78,6 @@ function createMonitoring({storage,getLlmConfig,modelGenerate,modelReplay}) {
   function confirm(id,body) {
     const p=entity('monitor_plans',id),r=revision(p);if(body.revision_id!==r.id)fail('请确认当前修订',409);
     if(!PlanDocument.ready(PlanDocument.documentOf(r.data)))fail('方案文档为空或仍有待补齐内容，请完善完整文档后确认');
-    const pending=planSkills(r.data,id=>storage.byId('service_skills',id)).filter(s=>!s.ready);if(pending.length)fail(pending.map(s=>s.code+'：'+s.reason).join('；'),409);
     if(r.confirmed)return clone(r);
     return clone(storage.update('monitor_revisions',r.id,{confirmed:true,confirmed_by:requireText(body.actor,'确认人'),confirmed_at:now()}));
   }
@@ -134,8 +133,8 @@ function createMonitoring({storage,getLlmConfig,modelGenerate,modelReplay}) {
   function importService(body) {
     const code=requireText(body.code,'业务Skill编码'),version=requireText(body.version,'业务Skill版本'),scene=requireText(body.scene,'业务Skill场景');
     if(!scopes.slice(0,3).includes(body.scope))fail('业务Skill需属于一个对象');
-    const raw=typeof body.raw==='string'?body.raw.trim():'',source=requireText(body.source,'业务Skill来源');
-    const digest=hash({raw});const existing=list('service_skills').filter(s=>s.code===code&&s.version===version&&s.scope===body.scope).at(-1);
+    const raw=typeof body.raw==='string'?body.raw:'',source=requireText(body.source,'业务Skill来源');
+    const digest=hash({raw});const existing=list('service_skills').filter(s=>!s.deleted_at&&s.code===code&&s.version===version&&s.scope===body.scope&&(body.scene_id?s.scene_id===body.scene_id:s.scene===scene)).at(-1);
     if(existing){if((body.scene_id?existing.scene_id!==body.scene_id:existing.scene!==scene))fail('同编码版本场景不一致',409);if(existing.content_hash===digest)return clone(existing);if(existing.raw||!raw)fail('同编码版本已存在，不能覆盖；请登记新的修订版本',409);}
     return clone(storage.insert('service_skills',{code,version,scope:body.scope,scene,scene_id:body.scene_id||null,scene_snapshot:body.scene_snapshot||null,raw,source,snapshot_revision:(existing?.snapshot_revision||0)+1,content_hash:digest,runtime_verified:false,actor:requireText(body.actor,'登记人'),based_on_id:body.based_on_id||null}));
   }

@@ -41,3 +41,18 @@ body.agent-page{height:100vh;height:100dvh;overflow:hidden}.agent-page .app{heig
 .agent-message.from-agent{padding-right:12%}
 @media(max-width:950px){.agent-message.from-user .message-body{max-width:84%}.agent-message.from-agent{padding-right:6%}}
 @media(max-width:700px){.agent-thread .agent-message{margin-top:22px;margin-bottom:22px}.agent-message.from-user{gap:8px}.agent-message.from-user .message-body{max-width:86%}.from-user .message-text{padding:10px 13px}.agent-message.from-agent{padding-right:0}}
+
+/* Lightweight ticket flags stay independent of evaluation and review. */
+.record-mark .ws-icon{width:16px;height:16px}
+.record-mark.is-marked{color:#965b13;background:#fff7e6;border-color:#e7c994}
+.record-mark.is-marked .ws-icon{fill:#f1ce7c}
+.record-mark:focus-visible,.record-mark-filter:focus-within{outline:2px solid #24584a;outline-offset:3px}
+.record-filters .record-mark-filter{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;cursor:pointer;color:#475569;font-size:13px;min-height:38px}
+.record-filters .record-mark-filter input{width:16px;height:16px;min-height:0;accent-color:#24584a}
+.evidence-heading-actions{display:flex;align-items:center;gap:14px;flex-shrink:0}
+.review-state.state-pending{background:#f1f5f9;color:#64748b}
+
+.issue-record-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.issue-record-actions .btn{font-size:12px;padding:7px 9px;min-height:34px}
+.batch-summary-filters .record-mark-filter{display:inline-flex;flex-direction:row;align-items:center;gap:6px;white-space:nowrap;cursor:pointer}
+.batch-summary-filters .record-mark-filter input{width:15px;height:15px;accent-color:#24584a}

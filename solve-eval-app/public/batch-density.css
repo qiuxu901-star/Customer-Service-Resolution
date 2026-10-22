@@ -1,0 +1,94 @@
+/* Batch summary: keep global filters and counts in one line, leave height for findings. */
+.batch-detail-page:has(.batch-workspace) .content{padding:10px 20px 12px}
+.batch-workspace{gap:8px}
+.batch-page-head{gap:12px}
+.batch-page-head h1{font-size:20px;margin:2px 0 0}
+.batch-page-head p{margin:2px 0 0;font-size:11px}
+.batch-page-head .link{font-size:11px}
+.batch-page-stats .btn{min-height:32px;padding:5px 10px}
+.batch-page-tabs{gap:22px}
+.batch-page-tabs>button{min-height:35px;padding:7px 2px;font-size:13px}
+.batch-tab-content{border-radius:9px}
+.batch-summary-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex:none;padding:7px 12px;border-bottom:1px solid #dce5de;background:#fafcf9;min-width:0}
+.batch-summary-filters{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-width:0}
+.batch-summary-filters label{display:flex;align-items:center;gap:7px;font-size:11px;color:#6b7d70;white-space:nowrap}
+.batch-summary-filters .select-inline{font-size:12px;min-height:30px;padding:4px 22px 4px 8px;max-width:195px;background:white}
+.batch-summary-filters .btn{min-height:28px;padding:3px 8px;font-size:11px}
+.batch-summary-range{font-size:11px;color:#748579;white-space:nowrap}
+.batch-summary-range b{font-weight:600;color:#35533f}
+.batch-directory-head{padding:10px 12px 8px}
+.batch-directory-head h2{font-size:12px;margin:0 0 7px}
+.batch-issue-search input{min-height:32px;padding:6px 9px;font-size:11px}
+.batch-directory-head>p{font-size:10px;margin:5px 0 0}
+.batch-issue-list{padding:0 6px 9px}
+.batch-issue-list>button{min-height:47px;padding:8px 8px;margin:2px 0}
+.batch-directory-name{font-size:12px;line-height:1.55}
+.batch-directory-name small{font-size:10px;margin-top:3px}
+.batch-directory-name .batch-directory-kind{display:none}
+.batch-directory-section{font-size:10px;margin:9px 8px 3px}
+.batch-detail-header{display:flex;align-items:center;gap:14px;padding:9px 14px 0;flex:none;border-bottom:1px solid #e3eae4;min-width:0}
+.batch-detail-header .batch-issue-heading{flex:1;min-width:0;padding:0 0 7px}
+.batch-detail-header .batch-issue-heading h2{font-size:16px;line-height:1.45;margin:0 0 2px}
+.batch-detail-header .batch-issue-heading p{font-size:10px;line-height:1.6;margin:0}
+.batch-detail-header .batch-detail-tabs{padding:0;border:0;gap:16px;align-self:stretch;align-items:center;white-space:nowrap}
+.batch-detail-header .batch-detail-tabs>button{min-height:35px;padding:7px 0;font-size:11px}
+.batch-issue-scroll{padding:0 14px 10px}
+.issue-common-summary{padding:7px 0;margin-bottom:7px;line-height:1.7}
+.issue-common-label{font-size:10px;margin-right:7px}
+.issue-common-summary>p{display:inline;font-size:11px;line-height:1.7;margin:0}
+.issue-common-summary>small{display:none}
+.issue-evidence-table th{padding:7px 9px;font-size:11px}
+.issue-evidence-table td{padding:8px 9px!important;line-height:1.65}
+.issue-record-heading{display:flex;align-items:flex-start;gap:6px;flex-wrap:wrap}
+.issue-record-heading>strong{font-size:12px;line-height:1.7;overflow-wrap:anywhere;flex:1;min-width:75px}
+.issue-record-heading>.grade-pill{font-size:10px;min-width:28px;padding:1px 5px;line-height:1.8}
+.issue-record-count{font-size:10px;margin:4px 0;line-height:1.65}
+.issue-record-cell>.btn{margin-top:3px!important;min-height:25px!important}
+.issue-finding-number{margin-bottom:2px}
+.issue-category-tag{margin-bottom:2px;line-height:1.5}
+.issue-problem-cell>p{font-size:13px;line-height:1.7;margin:2px 0!important}
+.issue-evidence-reason{line-height:1.65;margin:0 0 5px!important;font-size:12px}
+.issue-evidence-table .issue-quote-excerpt{padding:4px 7px;margin:4px 0;line-height:1.65}
+.issue-quote-excerpt p{font-size:11px;line-height:1.65}
+.issue-evidence-actions>.btn{min-height:22px!important;padding:2px 0!important;line-height:1.5}
+.issue-table-footer{margin:9px 0;gap:8px;font-size:10px}
+.issue-table-footer .btn{min-height:27px;font-size:10px;padding:3px 8px}
+.batch-issue-actions{padding:7px 13px;gap:8px}
+.batch-issue-actions .btn{min-height:31px;padding:5px 10px;font-size:11px}
+.batch-issue-note{display:none}
+.issue-evidence-list>.actions{margin:7px 0}
+.issue-evidence-list>.actions .btn{min-height:29px;padding:4px 9px;font-size:11px}
+.batch-summary-empty{padding:15px}
+.batch-summary-empty .empty{margin:10px 0}
+@media(max-width:1100px){
+ .batch-summary-toolbar{gap:8px;flex-wrap:wrap;padding:6px 10px}
+ .batch-summary-filters{gap:9px}.batch-summary-range{margin-left:auto;font-size:10px}
+ .batch-summary-filters .select-inline{max-width:170px}
+ .batch-directory-head{padding:6px 10px;display:flex;align-items:center;gap:8px}
+ .batch-directory-head h2{margin:0;font-size:11px}
+ .batch-issue-search{max-width:250px;flex:1}
+ .batch-issue-list{max-height:68px;padding:0 8px 6px;gap:5px}
+ .batch-issue-list>button{flex-basis:170px;min-height:45px;padding:6px 9px;margin:0}
+ .batch-directory-name{font-size:11px}.batch-directory-section{display:none}
+ .batch-detail-header{padding:7px 12px 0;gap:10px}
+ .batch-detail-header .batch-issue-heading h2{font-size:14px}
+ .batch-issue-scroll{padding:0 12px 8px}
+}
+@media(max-width:700px){
+ .batch-detail-page:has(.batch-workspace) .content{padding:8px}
+ .batch-page-head h1{font-size:17px}.batch-page-head p{font-size:10px}
+ .batch-summary-filters{gap:8px;width:100%}
+ .batch-summary-filters label{gap:5px;font-size:10px}
+ .batch-summary-filters .select-inline{max-width:135px;font-size:11px;min-height:28px}
+ .batch-summary-range{width:100%;margin:0;font-size:10px}
+ .batch-directory-head h2{display:none}
+ .batch-detail-header{align-items:flex-start;gap:7px;flex-wrap:wrap}
+ .batch-detail-header .batch-issue-heading{padding-bottom:2px;flex-basis:100%}
+ .batch-detail-header .batch-detail-tabs{gap:15px}
+ .batch-detail-header .batch-detail-tabs>button{min-height:28px;padding:4px 0}
+ .batch-issue-actions{padding:6px 9px}.batch-issue-actions .btn{min-height:29px;font-size:10px}
+ .issue-evidence-table td{padding:7px!important}
+}
+/* The picker replaces native selects, so size the visible trigger as well. */
+.batch-summary-filters .ui-picker-button{min-height:30px;padding:4px 24px 4px 8px;font-size:12px;max-width:195px;line-height:1.5}
+@media(max-width:700px){.batch-summary-filters .ui-picker-button{min-height:28px;max-width:135px;font-size:11px}}
