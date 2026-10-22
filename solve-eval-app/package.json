@@ -1,6 +1,6 @@
 {
   "name": "customer-service-resolution",
-  "version": "1.8.6",
+  "version": "1.8.7",
   "private": true,
   "description": "AI客服评测与优化平台：会话评测、问题分析、人工复核、优化跟进与效果验证",
   "main": "server.js",
