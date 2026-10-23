@@ -1,7 +1,7 @@
 'use strict';
 let batchId='latest',selectedGrade='all',selectedRatingRun='latest';
 const gradeOrder=['L0','L1','L2','L3','U'],gradeLabels={L0:'错误或不可用',L1:'仅信息相关',L2:'有效辅助',L3:'完整方案可交付',U:'无法判断'};
-function ratingState(rating){return !rating?'pending':['pending','running','failed','not_applicable'].includes(rating.status)?rating.status:rating.report?.grade||'failed';}
+function ratingState(rating){return !rating?'pending':['pending','running','failed','not_applicable'].includes(rating.status)?rating.status:rating.grade||rating.report?.grade||'failed';}
 const kindLabels={file:'文件导入',sync:'接口同步',manual:'手工登记',legacy_unknown:'历史来源未知'};
 function sortedBatches(){return (data.batches||[]).slice().reverse();}
 function activeBatch(){return batchId==='all'?null:sortedBatches().find(b=>b.id===batchId)||(batchId==='latest'?sortedBatches()[0]:null);}

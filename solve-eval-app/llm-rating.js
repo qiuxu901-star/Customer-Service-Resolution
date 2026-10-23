@@ -237,6 +237,22 @@ function createLlmRating({storage,assertConfirmed,getLlmConfig,callModel=request
   const taxonomy=require('./issue-taxonomy').createIssueTaxonomy({storage}),classification=require('./issue-classification').createIssueClassification({storage,taxonomy});
   const get=(c,id)=>storage.byId(c,id)||fail('记录不存在',404),tasks=new Map();let activeCalls=0;const queue=[];
   const now=()=>clock().toISOString();
+  // 评级跑批写入节流状态（execute 内使用）：step_runs/中间输入/进度计数合并落盘。
+  const pendingSteps=new Map(),pendingInputs=new Map();let progressDirty=false,flushTimer=null,currentRunId=null;
+  function scheduleFlush(){if(flushTimer)return;flushTimer=setTimeout(()=>{flushTimer=null;flushPending();},2000);if(flushTimer.unref)flushTimer.unref();}
+  function flushPending(){
+    if(!pendingSteps.size&&!pendingInputs.size&&!progressDirty)return;
+    const steps=[...pendingSteps.entries()];pendingSteps.clear();
+    const inputs=[...pendingInputs.entries()];pendingInputs.clear();
+    const prog=progressDirty;progressDirty=false;
+    try{
+      storage.transaction(()=>{
+        for(const [rid,step_runs] of steps)storage.update('monitor_ratings',rid,{step_runs,current_step:step_runs.find(s=>s.status==='running')?.id||null});
+        for(const [rid,input] of inputs)storage.update('monitor_ratings',rid,{request_snapshot:input,input_hash:hash(input),context_stats:contextStats(input,SYSTEM)});
+        if(prog&&currentRunId)updateProgressInner(currentRunId);
+      });
+    }catch(e){/* 中间态丢失可接受：completed/failed 时会写最终 step_runs，跑批结束时会落盘进度 */}
+  }
   async function limited(fn){if(limiter)return limiter(fn);if(activeCalls>=concurrency)await new Promise(resolve=>queue.push(resolve));else activeCalls++;try{return await fn();}finally{const next=queue.shift();if(next)next();else activeCalls--;}}
   // An interrupted process never reports queued or in-flight calls as completed/U.
   storage.transaction(()=>{for(const run of storage.list('monitor_rating_runs').filter(r=>r.kind==='llm_record_rating'&&r.status==='running')){for(const r of storage.list('monitor_ratings').filter(r=>r.run_id===run.id&&['pending','running'].includes(r.status)))storage.update('monitor_ratings',r.id,{status:'failed',error:'服务重启中断本次评级，可重试失败记录',current_step:null,...(r.step_runs?{step_runs:Capability.interruptedSteps(r.step_runs,'服务重启中断本次评级')}:{}),finished_at:now()});const rows=storage.list('monitor_ratings').filter(r=>r.run_id===run.id);storage.update('monitor_rating_runs',run.id,{status:'interrupted',finished_at:now(),processed_count:rows.length,failed_count:rows.filter(r=>r.status==='failed').length,completed_count:rows.filter(r=>r.status==='completed').length,not_applicable_count:rows.filter(r=>r.status==='not_applicable').length});}});
@@ -256,7 +272,12 @@ function createLlmRating({storage,assertConfirmed,getLlmConfig,callModel=request
     const run=storage.transaction(()=>{const run=storage.insert('monitor_rating_runs',{batch_id:batchId,kind:'llm_record_rating',status:'running',actor,request_id:requestId,request_hash:fingerprint,rating_version:VERSION,rating_hash:PROMPT_HASH,prompt_version:VERSION,prompt_hash:PROMPT_HASH,system_prompt:SYSTEM,evaluator_skill_snapshot:clone(activeEvaluator),output_contract:clone(OUTPUT_CONTRACT),model_snapshot:snapshot(config),cache_capability:cacheCapability(config.base_url),routing_confirmation_id:confirmation.confirmation_id,routing_hash:confirmation.route_hash,total:frozen.length,processed_count:0,completed_count:0,failed_count:0,not_applicable_count:0,retry_failed:body.retry_failed===true});for(const {item,route,input,stats,evaluation_flow}of frozen)storage.insert('monitor_ratings',{run_id:run.id,batch_id:batchId,item_id:item.id,case_id:item.case_id,route_id:route.id,record_hash:route.record_hash,record_snapshot:clone(route.effective_record),scene_id:route.scene_id,scene_snapshot:clone(route.scene_snapshot),monitor_binding:clone(route.monitor_binding),model_snapshot:snapshot(config),rating_version:VERSION,rating_hash:PROMPT_HASH,prompt_hash:PROMPT_HASH,status:'pending',request_snapshot:input,evaluation_flow,step_runs:evaluation_flow.flow.steps.map(step=>({...step,status:'pending'})),evaluator_skill_snapshot:clone(activeEvaluator),context_stats:stats,input_hash:hash(input),actor});return clone(run);});
     const task=Promise.resolve().then(()=>execute(run.id,clone(config))).catch(()=>{storage.transaction(()=>{for(const r of storage.list('monitor_ratings').filter(r=>r.run_id===run.id&&['pending','running'].includes(r.status)))storage.update('monitor_ratings',r.id,{status:'failed',error:'评级任务中断，可重试失败记录',finished_at:now()});updateProgress(run.id,'interrupted');});}).finally(()=>tasks.delete(run.id));tasks.set(run.id,task);return run;
   }
-  function updateProgress(id,status){const rows=storage.list('monitor_ratings').filter(r=>r.run_id===id),completed_count=rows.filter(r=>r.status==='completed').length,failed_count=rows.filter(r=>r.status==='failed').length,not_applicable_count=rows.filter(r=>r.status==='not_applicable').length;return storage.update('monitor_rating_runs',id,{completed_count,failed_count,not_applicable_count,processed_count:completed_count+failed_count+not_applicable_count,...(status?{status,finished_at:now()}:{})});}
+  function updateProgressInner(id){const rows=storage.list('monitor_ratings').filter(r=>r.run_id===id),completed_count=rows.filter(r=>r.status==='completed').length,failed_count=rows.filter(r=>r.status==='failed').length,not_applicable_count=rows.filter(r=>r.status==='not_applicable').length;storage.update('monitor_rating_runs',id,{completed_count,failed_count,not_applicable_count,processed_count:completed_count+failed_count+not_applicable_count});}
+  function updateProgress(id,status){
+    currentRunId=id;
+    if(status){flushPending();updateProgressInner(id);return storage.update('monitor_rating_runs',id,{status,finished_at:now()});}
+    progressDirty=true;scheduleFlush();
+  }
   async function execute(id,config){
     const rows=storage.list('monitor_ratings').filter(r=>r.run_id===id);let index=0;
     async function worker(){while(index<rows.length){const r=rows[index++];await limited(async()=>{
@@ -264,16 +285,17 @@ function createLlmRating({storage,assertConfirmed,getLlmConfig,callModel=request
       try{
         const result=await Capability.runFlow({input:r.request_snapshot,snapshot:r.evaluation_flow,config,callModel,validateOutput,
           checkBudget:input=>assertBudget(input,config),
-          onProgress:step_runs=>storage.update('monitor_ratings',r.id,{step_runs,current_step:step_runs.find(s=>s.status==='running')?.id||null}),
-          onInput:input=>storage.update('monitor_ratings',r.id,{request_snapshot:input,input_hash:hash(input),context_stats:contextStats(input,SYSTEM)})});
+          onProgress:step_runs=>{pendingSteps.set(r.id,step_runs);scheduleFlush();},
+          onInput:input=>{pendingInputs.set(r.id,input);scheduleFlush();}});
         response=result.response;
+        pendingSteps.delete(r.id);pendingInputs.delete(r.id); // 丢弃过时中间态，避免节流刷新覆盖终态
         storage.update('monitor_ratings',r.id,{status:result.report.applicability==='not_applicable'?'not_applicable':'completed',report:result.report,step_runs:Capability.completedSteps(result.steps),current_step:null,raw_response:response.raw,response_attempts:response.response_attempts||null,usage:response.usage||null,elapsed_ms:response.elapsed_ms??null,cost_estimate:response.cost_estimate||null,finished_at:now()});
         classification.capture(r.id);
-      }catch(e){response=response||e.flow_response;storage.update('monitor_ratings',r.id,{status:'failed',error:e.statusCode?e.message:'模型评级执行失败，可重试或更换模型',...(e.flow_steps?{step_runs:e.flow_steps,current_step:null}:{}),response_attempts:response?.response_attempts||e.response_attempts||null,usage:response?.usage||e.usage||null,elapsed_ms:response?.elapsed_ms??e.elapsed_ms??null,cost_estimate:response?.cost_estimate||e.cost_estimate||null,...(response?{raw_response:response.raw}:typeof e.raw_response==='string'?{raw_response:e.raw_response}:{}),finished_at:now()});}
+      }catch(e){response=response||e.flow_response;pendingSteps.delete(r.id);pendingInputs.delete(r.id);storage.update('monitor_ratings',r.id,{status:'failed',error:e.statusCode?e.message:'模型评级执行失败，可重试或更换模型',...(e.flow_steps?{step_runs:e.flow_steps,current_step:null}:{}),response_attempts:response?.response_attempts||e.response_attempts||null,usage:response?.usage||e.usage||null,elapsed_ms:response?.elapsed_ms??e.elapsed_ms??null,cost_estimate:response?.cost_estimate||e.cost_estimate||null,...(response?{raw_response:response.raw}:typeof e.raw_response==='string'?{raw_response:e.raw_response}:{}),finished_at:now()});}
       updateProgress(id);
     });}}
 
-    await Promise.all(Array.from({length:Math.min(concurrency,rows.length)},worker));const latest=get('monitor_rating_runs',id);updateProgress(id,latest.failed_count?'completed_with_errors':'completed');if(onCompleted)try{onCompleted(id);}catch(e){storage.update('monitor_rating_runs',id,{learning_error:'检查建议整理失败，可稍后重试'});}
+    await Promise.all(Array.from({length:Math.min(concurrency,rows.length)},worker));flushPending();const latest=get('monitor_rating_runs',id);updateProgress(id,latest.failed_count?'completed_with_errors':'completed');if(onCompleted)try{onCompleted(id);}catch(e){storage.update('monitor_rating_runs',id,{learning_error:'检查建议整理失败，可稍后重试'});}
   }
   // Trials have their own collection: they never enter production rating counts.
   for(const trial of storage.list('evaluator_skill_trials').filter(t=>t.status==='running')){const sides=clone(trial.sides);for(const side of Object.values(sides))if(['pending','running'].includes(side.status)){side.status='failed';side.error='服务重启中断试评，请重新发起';if(side.step_runs)side.step_runs=Capability.interruptedSteps(side.step_runs,side.error);}storage.update('evaluator_skill_trials',trial.id,{sides,status:'interrupted',finished_at:now(),error:'服务重启中断试评，请重新发起'});}

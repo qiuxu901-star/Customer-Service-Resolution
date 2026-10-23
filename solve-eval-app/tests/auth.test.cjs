@@ -24,7 +24,7 @@ test('账号生命周期：所有入口鉴权、权限、重置、会话撤销�
   }
   async function start(extra = {}) {
     child = spawn(process.execPath, [path.join(__dirname, '../server.js')], { env: { ...process.env, CSR_DATA_DIR: dir, PORT: String(port), HOST: '127.0.0.1', CSR_ADMIN_PHONE: '', CSR_ADMIN_PASSWORD: '', ...extra }, stdio: 'ignore' });
-    for (let n = 0; n < 100; n++) { try { if ((await call('GET', '/api/health')).status === 200) return; } catch {} await new Promise(resolve => setTimeout(resolve, 30)); }
+    for (let n = 0; n < 400; n++) { try { if ((await call('GET', '/api/health')).status === 200) return; } catch {} await new Promise(resolve => setTimeout(resolve, 50)); }
     throw Error('测试服务未启动');
   }
   async function stop() { if (child && child.exitCode === null) { const ended = once(child, 'exit'); child.kill(); await ended; } }

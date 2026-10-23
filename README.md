@@ -53,7 +53,7 @@ node server.js          # Node >= 18，零依赖，无需 npm install
 | CI | push/PR 到 main 自动跑：JS 语法检查 + 服务启动冒烟（bootstrap 与 agent/chat 健康检查） |
 | 发布 | GitHub Release 对应每个 minor/major tag，发布说明摘自 CHANGELOG |
 
-当前版本：**v1.8.7**（2026-10-23 评级协议一致性与模型输出纠错修复，见 CHANGELOG）。
+当前版本：**v1.8.8**（2026-10-23 工作台加载性能修复：评级按需加载、跑批轮询轻量化、写入节流与响应 gzip 压缩，见 CHANGELOG）。
 
 ## 线上部署（2026-10-14）
 
@@ -74,24 +74,24 @@ node server.js          # Node >= 18，零依赖，无需 npm install
 本地也可从确定的提交构建发布包：
 
 ```bash
-git archive --format=tar.gz --prefix=customer-service-resolution/ --output=/tmp/csr-v1.8.7.tar.gz HEAD solve-eval-app scripts README.md CHANGELOG.md templates
-scp /tmp/csr-v1.8.7.tar.gz root@47.103.25.159:/tmp/
+git archive --format=tar.gz --prefix=customer-service-resolution/ --output=/tmp/csr-v1.8.8.tar.gz HEAD solve-eval-app scripts README.md CHANGELOG.md templates
+scp /tmp/csr-v1.8.8.tar.gz root@47.103.25.159:/tmp/
 ```
 
 在服务器解出该版本自己的部署脚本，再运行：
 
 ```bash
-mkdir -p /tmp/csr-v1.8.7-deploy
-tar -xzf /tmp/csr-v1.8.7.tar.gz -C /tmp/csr-v1.8.7-deploy customer-service-resolution/scripts/deploy.sh
+mkdir -p /tmp/csr-v1.8.8-deploy
+tar -xzf /tmp/csr-v1.8.8.tar.gz -C /tmp/csr-v1.8.8-deploy customer-service-resolution/scripts/deploy.sh
 # 普通升级：保留正在使用的数据目录
-bash /tmp/csr-v1.8.7-deploy/customer-service-resolution/scripts/deploy.sh /tmp/csr-v1.8.7.tar.gz
+bash /tmp/csr-v1.8.8-deploy/customer-service-resolution/scripts/deploy.sh /tmp/csr-v1.8.8.tar.gz
 # 可选：不沿用旧数据和账号（需要重新初始化管理员）
-RESET_DATA=1 BIND_HOST=0.0.0.0 bash /tmp/csr-v1.8.7-deploy/customer-service-resolution/scripts/deploy.sh /tmp/csr-v1.8.7.tar.gz
+RESET_DATA=1 BIND_HOST=0.0.0.0 bash /tmp/csr-v1.8.8-deploy/customer-service-resolution/scripts/deploy.sh /tmp/csr-v1.8.8.tar.gz
 ```
 
 两条部署命令按需要择一执行。`RESET_DATA=1` 为本次版本创建全新数据目录，不会带入开发机数据和密钥；旧目录不再使用，临时保留以便部署失败时恢复。正式服务默认监听 `127.0.0.1:8818`，通过原 nginx 反向代理访问。当前原域名解析未就绪、旧服务可通过 IP 的 8818 端口访问；本次命令显式使用 `BIND_HOST=0.0.0.0` 保持原 IP 入口。部署脚本不会修改其他服务、防火墙或 nginx。模型连接需要上线后重新配置。
 
-预检可使用 `DEPLOY_DRY_RUN=1 APP_DIR=/tmp/csr-check bash .../deploy.sh /tmp/csr-v1.8.7.tar.gz`；只检查发布包，不切换服务或修改运行数据。健康检查失败时脚本恢复原版本链接和 systemd 配置，恢复原来处于运行状态的服务。
+预检可使用 `DEPLOY_DRY_RUN=1 APP_DIR=/tmp/csr-check bash .../deploy.sh /tmp/csr-v1.8.8.tar.gz`；只检查发布包，不切换服务或修改运行数据。健康检查失败时脚本恢复原版本链接和 systemd 配置，恢复原来处于运行状态的服务。
 
 ## 配置迁移准备（仅在本机执行）
 

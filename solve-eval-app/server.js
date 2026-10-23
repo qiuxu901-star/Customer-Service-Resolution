@@ -6,6 +6,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const { Storage } = require('./storage');
 const { analyze, parseMessages, mergeSupplements } = require('./engine');
 const { seedStandards } = require('./standards-seed');
@@ -28,9 +29,19 @@ ensureAgentConfig(storage);
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml' };
 
+// 大响应（如 /api/monitor 全量约 15MB）按客户端支持 gzip 后下发，JSON 压缩率约 75%，
+// 显著降低弱网/隧道链路下的传输耗时。阈值 4KB 以下不压缩，避免小响应无谓 CPU 开销。
 function send(res, code, obj) {
-  const body = JSON.stringify(obj);
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  let body = JSON.stringify(obj);
+  const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' };
+  const accept = String(res.req?.headers['accept-encoding'] || '');
+  if (body.length >= 4096 && accept.includes('gzip')) {
+    try {
+      const gz = zlib.gzipSync(Buffer.from(body), { level: 6 });
+      if (gz.length < body.length) { body = gz; headers['Content-Encoding'] = 'gzip'; }
+    } catch (e) { /* 压缩失败按原文下发，不影响功能 */ }
+  }
+  res.writeHead(code, headers);
   res.end(body);
 }
 
@@ -877,6 +888,11 @@ const monitorRoutes = {
   'POST /api/monitor/issue-classification-suggestions/:id/apply': async (body,p) => ({suggestion:issueClassificationAI.apply(p.id,body)}),
   'POST /api/monitor/ratings/:id/diagnoses/preview': async (body,p) => skillDiagnosis.preview(p.id,body),
   'POST /api/monitor/ratings/:id/diagnoses': async (body,p) => ({diagnosis:skillDiagnosis.start(p.id,body)}),
+  // 按需加载：完整评级报告（含快照与原始返回）单条拉取，不进 /api/monitor 全量响应。
+  'GET /api/monitor/ratings/:id': async (body,p) => ({rating:batchRating.getRating(p.id)}),
+  'GET /api/monitor/item-ratings/:id': async (body,p) => ({ratings:batchRating.getItemRatings(p.id)}),
+  // 评级跑批轮询专用轻量端点：仅返回进行中跑批及其记录摘要，替代 1.5s 一次的全量刷新。
+  'GET /api/monitor/rating-progress': async () => batchRating.ratingProgress(),
   'POST /api/monitor/service-skill-links': async body => serviceSkillLinks.bind(body),
   'POST /api/monitor/batch-skill-diagnoses/preview': async body => batchSkillDiagnosis.preview(body),
   'POST /api/monitor/batch-skill-diagnoses': async body => ({diagnosis:batchSkillDiagnosis.start(body)}),

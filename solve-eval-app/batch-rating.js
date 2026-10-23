@@ -99,7 +99,25 @@ function createBatchRating({storage,monitor,scenes,clock,getLlmConfig,callModel,
     if(!!item.focus_marked===body.marked)return clone(item);
     return clone(storage.update('monitor_batch_items',id,{focus_marked:body.marked,focus_marked_by:body.marked?text(body.actor,'标记人'):null,focus_marked_at:body.marked?new Date().toISOString():null}));
   }
-  function bootstrap(){return {...(ingestion?.bootstrap()||{}),evaluator_skill:evaluatorSkill.bootstrap(),batches:storage.list('monitor_batches'),batch_items:storage.list('monitor_batch_items'),rating_runs:storage.list('monitor_rating_runs'),ratings:storage.list('monitor_ratings'),batch_routing_reviews:ingestion?storage.list('monitor_batches').map(b=>ingestion.review(b.id)):[],routing_confirmations:storage.list('monitor_batch_confirmations'),rating_contract:{version:llm?require('./llm-rating').VERSION:RATING_VERSION,hash:llm?require('./llm-rating').PROMPT_HASH:RATING_HASH,grades:GRADE_DEFINITIONS,dimensions:DIMENSIONS,aggregation:llm?'按全局评估员评级；有场景方案时执行专属检查，无方案时基础分析；失败及不适用不计入等级分布':'关键错误L0优先，其次U，其余取最低等级；全诉求L3才是记录L3',denominator:'记录等级占已评唯一记录（含U）；待评及失败单独列示',method:llm?'按已确认方案文档逐条调用 LLM；保存结构化评级与引用依据':'已确认业务评估依据 + 受限事实执行器；未配置通用模型评级',llm_enabled:!!llm,sync_connector_connected:false}};}
-  return {importBatch,evaluate,bootstrap,markItem,startPlanTrial:body=>llm?llm.startPlanTrial(body):fail('请先配置分析模型',409),startEvaluatorTrial:body=>llm?llm.startTrial(body):fail('未配置 LLM 试评',409),getEvaluatorTrial:id=>llm.getTrial(id),getRatingRun:id=>llm?llm.getRun(id):clone(get('monitor_rating_runs',id)),waitForRating:id=>llm?.wait(id)||Promise.resolve(),preview:body=>ingestion.preview(body),resolveItem:(id,body)=>ingestion.resolveItem(id,body),routingReview:id=>ingestion.review(id),resolveGroup:(id,body)=>ingestion.resolveGroup(id,body),refreshRouting:(id,body)=>ingestion.refreshRoutes(id,body),confirmRouting:(id,body)=>ingestion.confirm(id,body)};
+  // /api/monitor 下发评级时剔除三个可回退/按需获取的字段，LLM 评级单条从约 77KB 降到约 17KB：
+  // evaluator_skill_snapshot（回退 request_snapshot.evaluator_skill）、record_snapshot（回退 batch_items.record_snapshot）、
+  // request_snapshot.reference_index（规则全文索引，约 58KB/条；详情经 GET /api/monitor/ratings/:id 按需拉取完整数据）。
+  function ratingDigest(r){
+    const run=r.run_id?storage.byId('monitor_rating_runs',r.run_id):null;
+    const llm=run?.kind==='llm_record_rating';
+    if(!llm)return clone(r);
+    const rest={...r};
+    delete rest.evaluator_skill_snapshot;
+    delete rest.record_snapshot;
+    if(rest.request_snapshot&&typeof rest.request_snapshot==='object'){const {reference_index,...snapshotRest}=rest.request_snapshot;rest.request_snapshot=snapshotRest;}
+    if(rest.grade===undefined)rest.grade=r.report?.grade||null; // 顶层等级便于列表/统计直接使用
+    return rest;
+  }
+  function bootstrap(){return {...(ingestion?.bootstrap()||{}),evaluator_skill:evaluatorSkill.bootstrap(),batches:storage.list('monitor_batches'),batch_items:storage.list('monitor_batch_items'),rating_runs:storage.list('monitor_rating_runs'),ratings:storage.list('monitor_ratings').map(ratingDigest),batch_routing_reviews:ingestion?storage.list('monitor_batches').map(b=>ingestion.review(b.id)):[],routing_confirmations:storage.list('monitor_batch_confirmations'),rating_contract:{version:llm?require('./llm-rating').VERSION:RATING_VERSION,hash:llm?require('./llm-rating').PROMPT_HASH:RATING_HASH,grades:GRADE_DEFINITIONS,dimensions:DIMENSIONS,aggregation:llm?'按全局评估员评级；有场景方案时执行专属检查，无方案时基础分析；失败及不适用不计入等级分布':'关键错误L0优先，其次U，其余取最低等级；全诉求L3才是记录L3',denominator:'记录等级占已评唯一记录（含U）；待评及失败单独列示',method:llm?'按已确认方案文档逐条调用 LLM；保存结构化评级与引用依据':'已确认业务评估依据 + 受限事实执行器；未配置通用模型评级',llm_enabled:!!llm,sync_connector_connected:false}};}
+  function getRating(id){return clone(get('monitor_ratings',id));}
+  function getItemRatings(itemId){return storage.list('monitor_ratings').filter(r=>r.item_id===itemId).map(clone);}
+  // 评级跑批轮询专用：只返回进行中的跑批及其记录摘要，避免全量刷新（完整 bootstrap 约 15MB）。
+  function ratingProgress(){const runs=storage.list('monitor_rating_runs').filter(r=>r.status==='running');const ids=new Set(runs.map(r=>r.id));return {runs:runs.map(clone),ratings:ids.size?storage.list('monitor_ratings').filter(r=>ids.has(r.run_id)).map(ratingDigest):[]};}
+  return {importBatch,evaluate,bootstrap,markItem,getRating,getItemRatings,ratingProgress,startPlanTrial:body=>llm?llm.startPlanTrial(body):fail('请先配置分析模型',409),startEvaluatorTrial:body=>llm?llm.startTrial(body):fail('未配置 LLM 试评',409),getEvaluatorTrial:id=>llm.getTrial(id),getRatingRun:id=>llm?llm.getRun(id):clone(get('monitor_rating_runs',id)),waitForRating:id=>llm?.wait(id)||Promise.resolve(),preview:body=>ingestion.preview(body),resolveItem:(id,body)=>ingestion.resolveItem(id,body),routingReview:id=>ingestion.review(id),resolveGroup:(id,body)=>ingestion.resolveGroup(id,body),refreshRouting:(id,body)=>ingestion.refreshRoutes(id,body),confirmRouting:(id,body)=>ingestion.confirm(id,body)};
 }
 module.exports={createBatchRating,gradeRecord,RATING_VERSION,RATING_HASH,DIMENSIONS};

@@ -29,7 +29,24 @@ async function startLlmBatch(retryFailed=false){
 }
 const renderBeforeLlm=render;
 render=function(){renderBeforeLlm();clearTimeout(ratingPollTimer);if((data.rating_runs||[]).some(r=>r.status==='running'))ratingPollTimer=setTimeout(pollLlmRating,1500);};
-async function pollLlmRating(){if(ratingPolling)return;if(busy||!$('overlay').hidden){ratingPollTimer=setTimeout(pollLlmRating,1500);return;}ratingPolling=true;try{await refresh();}catch{ratingPollTimer=setTimeout(pollLlmRating,3000);}finally{ratingPolling=false;}}
+// 轮询改增量：只拉进行中跑批及其记录摘要（轻量端点），不再 1.5s 全量刷新 /api/monitor；
+// 检测到跑批结束时补一次全量刷新，拿取完成时才生成的检查建议等数据。
+async function pollLlmRating(){
+  if(ratingPolling)return;
+  if(busy||!$('overlay').hidden){ratingPollTimer=setTimeout(pollLlmRating,1500);return;}
+  ratingPolling=true;
+  const hadRunning=(data.rating_runs||[]).some(r=>r.status==='running');
+  try{
+    const p=await request('GET','/api/monitor/rating-progress');
+    for(const run of p.runs||[]){const i=(data.rating_runs||[]).findIndex(r=>r.id===run.id);if(i>=0)data.rating_runs[i]={...data.rating_runs[i],...run};else data.rating_runs.push(run);}
+    for(const rt of p.ratings||[]){const i=(data.ratings||[]).findIndex(r=>r.id===rt.id);if(i>=0)data.ratings[i]={...data.ratings[i],...rt};else data.ratings.push(rt);}
+    const hasRunning=(data.rating_runs||[]).some(r=>r.status==='running');
+    if(hadRunning&&!hasRunning){await refresh();return;}
+    render();
+    if(hasRunning)ratingPollTimer=setTimeout(pollLlmRating,1500);
+  }catch{ratingPollTimer=setTimeout(pollLlmRating,3000);}
+  finally{ratingPolling=false;}
+}
 function evaluationConclusionHtml(r){
  const {raw,key_points,unresolved,legacy}=AnalysisSummary.conclusionParts(r);
  const paragraph=(label,text)=>{
@@ -76,7 +93,21 @@ function llmReportHtml(rating){
 
 }
 const ratingDetailBeforeLlm=ratingDetail;
-ratingDetail=function(itemId){const row=currentBatchRows().find(r=>r.item.id===itemId),rating=row?.rating;if(rating?.report?.method!=='llm_plan_document'&&!rating?.request_snapshot)return ratingDetailBeforeLlm(itemId);const record=rating.record_snapshot||effectiveItem(data.batch_items.find(i=>i.id===itemId)).record_snapshot;modal('<h2 id="modalTitle">'+esc(record.name)+' · LLM 评级报告</h2>'+llmReportHtml(rating)+'<h3>导入原始材料</h3>'+(record.business_record?businessRecordHtml(record):'<blockquote>'+esc(record.session_text)+'</blockquote><blockquote>'+esc(record.ai_reply)+'</blockquote>')+'<details><summary>本条历史评级</summary><pre>'+esc(JSON.stringify(data.ratings.filter(r=>r.item_id===itemId),null,2))+'</pre></details>');};
+// 完整报告（request_snapshot/raw_response/report 等约 60KB/条）按需单条拉取；/api/monitor 只下发摘要。
+ratingDetail=async function(itemId){
+  const row=currentBatchRows().find(r=>r.item.id===itemId),rating=row?.rating;
+  const run=rating?(data.rating_runs||[]).find(r=>r.id===rating.run_id):null;
+  if(run?.kind!=='llm_record_rating')return ratingDetailBeforeLlm(itemId);
+  const loading=typeof LocalLoading!=='undefined'&&LocalLoading.start?LocalLoading.start({text:'正在加载评级报告…'}):null;
+  try{
+    const {rating:full}=await request('GET','/api/monitor/ratings/'+rating.id);
+    const item=data.batch_items.find(i=>i.id===itemId);
+    const record=full.record_snapshot||effectiveItem(item).record_snapshot;
+    const history=await request('GET','/api/monitor/item-ratings/'+itemId).catch(()=>null);
+    const historyHtml=history?esc(JSON.stringify(history.ratings,null,2)):esc(JSON.stringify(data.ratings.filter(r=>r.item_id===itemId),null,2));
+    modal('<h2 id="modalTitle">'+esc(record.name)+' · LLM 评级报告</h2>'+llmReportHtml(full)+'<h3>导入原始材料</h3>'+(record.business_record?businessRecordHtml(record):'<blockquote>'+esc(record.session_text)+'</blockquote><blockquote>'+esc(record.ai_reply)+'</blockquote>')+'<details><summary>本条历史评级</summary><pre>'+historyHtml+'</pre></details>');
+  }finally{if(loading&&LocalLoading.stop)LocalLoading.stop(loading);}
+};
 document.addEventListener('change',e=>{if(e.target.id==='batchRatingModel'){const batch=activeBatch();if(batch){batchModelChoices.set(batch.id,e.target.value?JSON.parse(e.target.value):undefined);const capability=selectedRatingProfile(batch)?.cache_capability;if($('ratingCacheCapability'))$('ratingCacheCapability').textContent=(capability?.label||'缓存能力未知')+'：'+(capability?.note||'正文仍逐条发送，实际命中量以供应商返回为准');}}});
 document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b||b.disabled||busy)return;if(b.hasAttribute('data-retry-llm'))action(()=>startLlmBatch(true));});
 
